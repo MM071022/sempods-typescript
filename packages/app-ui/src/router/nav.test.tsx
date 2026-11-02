@@ -68,30 +68,36 @@ afterEach(() => {
   ask = null;
 });
 
-/** Moves through the history and waits for its popstate. */
-async function traverse(delta: number) {
+/** Runs `action` and waits for the history event it causes. */
+async function after(event: 'popstate' | 'hashchange', action: () => void) {
   await act(async () => {
-    const popped = new Promise((resolve) =>
-      addEventListener('popstate', resolve, { once: true }),
+    const fired = new Promise((resolve) =>
+      addEventListener(event, resolve, { once: true }),
     );
-    history.go(delta);
-    await popped;
+    action();
+    await fired;
   });
 }
+/** Moves through the history and waits for its popstate. */
+const traverse = (delta: number) => after('popstate', () => history.go(delta));
 const shown = () => screen.getByTestId('link').textContent;
 const address = () => location.pathname + location.search;
-const state = () => history.state as { position?: number; opener?: string };
+const state = () => history.state as { position?: number; from?: number };
 
 it('replaces a known address by its canonical form in place', () => {
   const length = history.length;
-  render(<Frame />);
+  const { rerender } = render(<Frame />);
   expect(shown()).toBe('list');
   expect(address()).toBe('/list');
   expect(history.length).toBe(length);
   expect(state().position).toBe(0);
+  // The same place keeps the same `nav`.
+  const first = nav;
+  rerender(<Frame />);
+  expect(nav).toBe(first);
 });
 
-it('pushes a switch with its opener and replaces in place', async () => {
+it('pushes a switch with its opener position and replaces in place', async () => {
   render(<Frame />);
   const length = history.length;
   act(() => nav.go({ page: 'task' }));
@@ -100,11 +106,11 @@ it('pushes a switch with its opener and replaces in place', async () => {
     'task',
     length + 1,
   ]);
-  expect(state()).toEqual({ position: 1, opener: '/list', from: 0 });
+  expect(state()).toEqual({ position: 1, from: 0 });
   act(() => nav.go({ page: 'other' }, { replace: true }));
   expect([address(), history.length]).toEqual(['/other', length + 1]);
   // The opener stays with the entry.
-  expect(state()).toEqual({ position: 1, opener: '/list', from: 0 });
+  expect(state()).toEqual({ position: 1, from: 0 });
   await traverse(-1);
   expect(shown()).toBe('list');
 });
@@ -121,14 +127,8 @@ it('switches on a plain click and leaves modified clicks to the browser', () => 
 
 it('closes to the opener, or replaces with the fallback after a direct entry', async () => {
   render(<Frame />);
-  expect(state().opener).toBe('/list');
-  await act(async () => {
-    const popped = new Promise((resolve) =>
-      addEventListener('popstate', resolve, { once: true }),
-    );
-    nav.close({ page: '' });
-    await popped;
-  });
+  expect(state().from).toBe(0);
+  await after('popstate', () => nav.close({ page: '' }));
   expect([address(), shown()]).toEqual(['/list', 'list']);
   // The document's first entry has no opener.
   const length = history.length;
@@ -150,13 +150,7 @@ it('undoes a declined Back and decides once for moves during the question', asyn
   expect(navigate).toHaveBeenCalledTimes(1);
   expect(shown()).toBe('task');
   // Staying returns to the shown entry; its popstate asks nothing.
-  await act(async () => {
-    const popped = new Promise((resolve) =>
-      addEventListener('popstate', resolve, { once: true }),
-    );
-    ask!(false);
-    await popped;
-  });
+  await after('popstate', () => ask!(false));
   expect([address(), shown(), state().position]).toEqual(['/task', 'task', at]);
   expect(navigate).toHaveBeenCalledTimes(1);
   // Leaving applies to where the browser is when the answer comes.
@@ -189,25 +183,13 @@ it('counts a fragment entry, so a declined Back returns to the shown entry', asy
   act(() => nav.go({ page: 'list' }));
   const list = state().position!;
   // A fragment link: a new entry at the same address, without a position.
-  await act(async () => {
-    const changed = new Promise((resolve) =>
-      addEventListener('hashchange', resolve, { once: true }),
-    );
-    location.hash = 'section';
-    await changed;
-  });
+  await after('hashchange', () => (location.hash = 'section'));
   expect(state().position).toBe(list + 1);
   act(() => nav.go({ page: 'task' }));
   expect(state().position).toBe(list + 2);
   asking = true;
   await traverse(-2);
-  await act(async () => {
-    const popped = new Promise((resolve) =>
-      addEventListener('popstate', resolve, { once: true }),
-    );
-    ask!(false);
-    await popped;
-  });
+  await after('popstate', () => ask!(false));
   expect([address(), shown(), state().position]).toEqual([
     '/task',
     'task',
@@ -220,21 +202,9 @@ it('closes to the opener past a fragment entry of the screen', async () => {
   act(() => nav.go({ page: 'list' }));
   act(() => nav.go({ page: 'task' }));
   const task = state();
-  await act(async () => {
-    const changed = new Promise((resolve) =>
-      addEventListener('hashchange', resolve, { once: true }),
-    );
-    location.hash = 'notes';
-    await changed;
-  });
+  await after('hashchange', () => (location.hash = 'notes'));
   expect(state()).toEqual({ ...task, position: task.position! + 1 });
-  await act(async () => {
-    const popped = new Promise((resolve) =>
-      addEventListener('popstate', resolve, { once: true }),
-    );
-    nav.close({ page: '' });
-    await popped;
-  });
+  await after('popstate', () => nav.close({ page: '' }));
   expect([address(), shown(), state().position]).toEqual([
     '/list',
     'list',

@@ -130,18 +130,18 @@ try {
     [
       ...readme.matchAll(new RegExp('```' + lang + '\\n([\\s\\S]*?)```', 'g')),
     ].map((m) => m[1]);
-  const examples = blocks('tsx');
-  const dialog = examples.find((block) =>
-    block.startsWith('// task-dialog.tsx'),
-  );
-  assert.ok(dialog, 'the README has no task-dialog.tsx example');
-  await writeFile(join(app, 'task-dialog.tsx'), dialog);
-  for (const [i, example] of examples.entries())
+  /** Writes the example that starts with `// <file>` as the app's file. */
+  const ship = async (lang, file) => {
+    const block = blocks(lang).find((b) => b.startsWith(`// ${file}`));
+    assert.ok(block, `the README has no ${file} example`);
+    await writeFile(join(app, file), block);
+    return block;
+  };
+  const dialog = await ship('tsx', 'task-dialog.tsx');
+  for (const [i, example] of blocks('tsx').entries())
     if (example !== dialog)
       await writeFile(join(app, `readme-${i}.tsx`), example);
-  const places = blocks('ts').find((block) => block.startsWith('// places.ts'));
-  assert.ok(places, 'the README has no places.ts example');
-  await writeFile(join(app, 'places.ts'), places);
+  await ship('ts', 'places.ts');
   const documentedCss = blocks('css')
     .find((block) => block.includes("@import '@sempods/app-ui/styles.css'"))
     ?.split('\n')

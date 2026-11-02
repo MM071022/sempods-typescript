@@ -63,5 +63,6 @@ opener-aware `close`, and one decision for history moves while the SDK asks.
 Changes against the spike: the history session starts on first use instead of
 at import, one popstate listener for all mounted frames, no decision for a
 move to the shown address, a fragment link's entry takes the next position
-and the opener (kept with its position, so `close` returns past it), and
-`link` leaves clicks with a `target` to the browser.
+and the opener's position (so `close` returns past it), `close` going back by
+that position instead of by the opener's address, and `link` leaving clicks
+with a `target` to the browser.

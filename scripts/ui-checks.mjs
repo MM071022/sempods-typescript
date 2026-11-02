@@ -16,7 +16,27 @@ const EDIT = ' (edited)';
 const xsd = 'http://www.w3.org/2001/XMLSchema#';
 const startDate = 'https://schema.org/startDate';
 const PLUMBER = 'Call the plumber about the kitchen tap';
+const PERSONAL = 'Call the plumber (personal copy)';
 const TRAIN = 'Book train tickets to Leipzig';
+
+/** The plumber task of the fixture Pod: its IRI, address and two Contexts. */
+function plumberTask(origin) {
+  const iri = origin + '/alice/tasks/1';
+  const id = Buffer.from(iri, 'utf8').toString('base64url');
+  return {
+    iri,
+    id,
+    at: `/tasks/${id}`,
+    work: origin + '/alice/_system/contexts/work',
+    personal: origin + '/alice/_system/contexts/personal',
+  };
+}
+
+/** The page's address: path and query. */
+function addressOf(page) {
+  const url = new URL(page.url());
+  return url.pathname + url.search;
+}
 
 /**
  * The key that moves the focus to the next control. WebKit on macOS follows
@@ -38,10 +58,12 @@ async function newPage(browser, options = {}) {
   return { context, page, errors };
 }
 
-/** Signs in to the fixture Pod and chooses its "work" context. */
-async function signIn(page, origin) {
+/**
+ * Signs in to the fixture Pod on `address` and chooses its "work" context.
+ */
+async function signIn(page, origin, address = '/') {
   await fetch(origin + '/__reset');
-  await page.goto(origin + '/');
+  await page.goto(origin + address);
   await page.getByLabel(/Pod address|Pod-Adresse/).fill(origin + '/alice');
   await page.getByRole('button', { name: /^(Sign in|Anmelden)$/ }).click();
   await page
@@ -427,16 +449,14 @@ const gateChecks = {
   'back-dirty-stay': async (c, page) => {
     await c.open();
     await c.dirty();
-    const url = new URL(page.url());
-    const address = url.pathname + url.search;
+    const address = addressOf(page);
     await page.goBack();
     const asked = await shown(c.confirm, 3000);
     if (asked) await c.confirm.getByRole('button').first().click();
     await hidden(c.confirm);
     await page.waitForTimeout(300);
     const s = await c.state();
-    const now = new URL(page.url());
-    const kept = now.pathname + now.search === address;
+    const kept = addressOf(page) === address;
     return {
       pass: asked && s.dialogOpen && s.draftKept && !s.confirmOpen && kept,
       asked,
@@ -510,9 +530,14 @@ async function gate({ browser, origin, engine }) {
   return results;
 }
 
+/** The tasks the fixture Pod stores. */
+async function storedTasks(origin) {
+  return (await fetch(origin + '/__store')).json();
+}
+
 /** The start date as the fixture Pod stores it. */
 async function stored(origin, title) {
-  const tasks = await (await fetch(origin + '/__store')).json();
+  const tasks = await storedTasks(origin);
   const task = tasks.find(
     (t) => t.body['https://schema.org/name']?.[0]?.['@value'] === title,
   );
@@ -1430,16 +1455,15 @@ async function until(page, condition, timeout = 10000) {
 
 /** The task's routing matrix, from the template's routing spike #114. */
 const routingChecks = (page, origin) => {
-  const task = origin + '/alice/tasks/1';
-  const id = Buffer.from(task, 'utf8').toString('base64url');
-  const at = `/tasks/${id}`;
-  const work = origin + '/alice/_system/contexts/work';
-  const personal = origin + '/alice/_system/contexts/personal';
-  const PERSONAL = 'Call the plumber (personal copy)';
-  const withSource = (context) =>
-    `${at}?context=${encodeURIComponent(context)}`;
+  const { iri: task, id, at, work, personal } = plumberTask(origin);
+  const withSource = (context, action = '') =>
+    `${at}${action}?context=${encodeURIComponent(context)}`;
   const details = page.getByRole('dialog', { name: /^(Details|Not today)$/ });
   const title = details.getByLabel('Title', { exact: true });
+  const closeButton = details.getByRole('button', {
+    name: 'Close',
+    exact: true,
+  });
   const confirm = page.getByRole('alertdialog');
   const notFound = page.getByRole('dialog', { name: 'Not found' });
   const zenTitle = page.locator('.zen-title');
@@ -1447,8 +1471,9 @@ const routingChecks = (page, origin) => {
   // Decoded, so the router's percent-encoding of the same address compares
   // equal.
   const url = () => new URL(page.url());
-  const path = () => decodeURIComponent(url().pathname + url().search);
+  const path = () => decodeURIComponent(addressOf(page));
   const pathname = () => url().pathname;
+  const historyLength = () => page.evaluate(() => history.length);
   const isTask = (p) =>
     p.startsWith('/tasks/') && !/^\/tasks\/(add|new)$/.test(p);
   /** What is shown matches the address: the task dialog exactly on tasks. */
@@ -1457,8 +1482,14 @@ const routingChecks = (page, origin) => {
   /** The address is `expected`, and the task dialog is open or not. */
   const showing = (expected, open) => async () =>
     path() === expected && (await details.isVisible()) === open;
+  /** On the task's address with its dialog open. */
+  const onTask = async () => pathname() === at && (await title.isVisible());
   const draft = () => title.inputValue({ timeout: 2000 }).catch(() => '');
   const dirty = async () => title.fill((await title.inputValue()) + EDIT);
+  const overview = async () => {
+    await page.goto(origin + '/');
+    await zenTitle.waitFor();
+  };
   const openFromOverview = async () => {
     await page.goto(origin + '/');
     await zenTitle.click();
@@ -1472,9 +1503,13 @@ const routingChecks = (page, origin) => {
     await plumberLink.waitFor();
   };
   const toListInApp = async () => {
-    await page.goto(origin + '/');
-    await zenTitle.waitFor();
+    await overview();
     await toList();
+  };
+  /** Opens the task from the list. */
+  const openFromList = async () => {
+    await plumberLink.click();
+    await title.waitFor();
   };
   /** Answers the SDK's leave question: keep editing, or discard. */
   const answer = async (choice) => {
@@ -1487,10 +1522,11 @@ const routingChecks = (page, origin) => {
     }
     return asked;
   };
-  const stored = async (context) =>
-    (await (await fetch(origin + '/__store')).json()).find(
-      (t) => t.context === context && t.body['@id'] === task,
-    )?.body['https://schema.org/name']?.[0]?.['@value'];
+  /** The task's name in a Context, among the stored tasks. */
+  const nameIn = (tasks, context) =>
+    tasks.find((t) => t.context === context && t.body['@id'] === task)?.body[
+      'https://schema.org/name'
+    ]?.[0]?.['@value'];
   return {
     async 'direct-entry-signed-in'() {
       await page.goto(origin + at);
@@ -1500,8 +1536,7 @@ const routingChecks = (page, origin) => {
     },
     // A plain click switches in place: no reload, the source in the address.
     async 'link-plain-click-in-place'() {
-      await page.goto(origin + '/');
-      await zenTitle.waitFor();
+      await overview();
       await page.evaluate(() => (window.marker = 'kept'));
       const href = await zenTitle.getAttribute('href');
       await zenTitle.click();
@@ -1518,8 +1553,7 @@ const routingChecks = (page, origin) => {
       };
     },
     async 'link-modified-click-new-tab'() {
-      await page.goto(origin + '/');
-      await zenTitle.waitFor();
+      await overview();
       const opened = page.context().waitForEvent('page', { timeout: 5000 });
       await zenTitle.click({ modifiers: ['ControlOrMeta'] });
       const tab = await opened.catch(() => null);
@@ -1547,24 +1581,23 @@ const routingChecks = (page, origin) => {
     },
     async 'close-returns-to-opener'() {
       await page.goto(origin + '/list');
-      await plumberLink.click();
-      await title.waitFor();
-      const before = await page.evaluate(() => history.length);
-      await details.getByRole('button', { name: 'Close', exact: true }).click();
+      await openFromList();
+      const before = await historyLength();
+      await closeButton.click();
       const back = await until(page, showing('/list', false));
       return {
         pass: back && (await plumberLink.isVisible()),
         path: path(),
-        historyLength: [before, await page.evaluate(() => history.length)],
+        historyLength: [before, await historyLength()],
       };
     },
     async 'close-direct-entry-falls-back'() {
       await page.goto(origin + at);
       await title.waitFor();
-      const before = await page.evaluate(() => history.length);
-      await details.getByRole('button', { name: 'Close', exact: true }).click();
+      const before = await historyLength();
+      await closeButton.click();
       const back = await until(page, showing('/', false));
-      const after = await page.evaluate(() => history.length);
+      const after = await historyLength();
       return {
         pass: back && after === before,
         path: path(),
@@ -1598,21 +1631,17 @@ const routingChecks = (page, origin) => {
       await page.goBack();
       const back = await until(page, showing('/', false));
       await page.goForward();
-      const forward = await until(
-        page,
-        async () => pathname() === at && (await title.isVisible()),
-      );
+      const forward = await until(page, onTask);
       return { pass: back && forward, back, forward, path: path() };
     },
     // The legacy link becomes the canonical address by replacement.
     async 'legacy-query-link'() {
-      await page.goto(origin + '/');
-      await zenTitle.waitFor();
-      const before = await page.evaluate(() => history.length);
+      await overview();
+      const before = await historyLength();
       await page.goto(origin + '/?task=' + id);
       await title.waitFor();
       const canonical = await until(page, async () => path() === at);
-      const after = await page.evaluate(() => history.length);
+      const after = await historyLength();
       return {
         pass: canonical && after === before + 1,
         path: path(),
@@ -1643,8 +1672,7 @@ const routingChecks = (page, origin) => {
       };
     },
     async 'menu-switches-view'() {
-      await page.goto(origin + '/');
-      await zenTitle.waitFor();
+      await overview();
       await toList();
       return { pass: path() === '/list', path: path() };
     },
@@ -1683,10 +1711,7 @@ const routingChecks = (page, origin) => {
       await page.goForward();
       const asked = await answer('keep');
       const kept = (await draft()).endsWith(EDIT);
-      const stayed = await until(
-        page,
-        async () => pathname() === at && (await consistent()),
-      );
+      const stayed = await until(page, onTask);
       // The history still works: Back asks again.
       await page.goBack();
       const again = await answer('keep');
@@ -1700,24 +1725,19 @@ const routingChecks = (page, origin) => {
     },
     async 'repeated-back-keep'() {
       await toListInApp();
-      await plumberLink.click();
-      await title.waitFor();
+      await openFromList();
       await dirty();
       await page.goBack();
       await confirm.waitFor({ timeout: 3000 });
       await page.goBack();
       const asked = await answer('keep');
-      const stayed = await until(
-        page,
-        async () => pathname() === at && (await consistent()),
-      );
+      const stayed = await until(page, onTask);
       const kept = (await draft()).endsWith(EDIT);
       return { pass: asked && stayed && kept, draftKept: kept, path: path() };
     },
     async 'repeated-back-discard'() {
       await toListInApp();
-      await plumberLink.click();
-      await title.waitFor();
+      await openFromList();
       await dirty();
       await page.goBack();
       await confirm.waitFor({ timeout: 3000 });
@@ -1730,15 +1750,11 @@ const routingChecks = (page, origin) => {
     },
     async 'multi-entry-traversal'() {
       await toListInApp();
-      await plumberLink.click();
-      await title.waitFor();
+      await openFromList();
       await page.evaluate(() => history.go(-2));
       const back = await until(page, showing('/', false));
       await page.evaluate(() => history.go(2));
-      const forward = await until(
-        page,
-        async () => pathname() === at && (await title.isVisible()),
-      );
+      const forward = await until(page, onTask);
       return { pass: back && forward, back, forward, path: path() };
     },
     async 'reload-then-back'() {
@@ -1748,10 +1764,7 @@ const routingChecks = (page, origin) => {
       await page.goBack();
       const back = await until(page, showing('/', false));
       await page.goForward();
-      const forward = await until(
-        page,
-        async () => pathname() === at && (await title.isVisible()),
-      );
+      const forward = await until(page, onTask);
       return { pass: back && forward, back, forward, path: path() };
     },
     // A fragment link adds an entry the router did not write (Codex, #208):
@@ -1783,11 +1796,10 @@ const routingChecks = (page, origin) => {
     // (Codex, #208), past the screen's fragment entry.
     async 'fragment-entry-close'() {
       await page.goto(origin + '/list');
-      await plumberLink.click();
-      await title.waitFor();
+      await openFromList();
       await page.evaluate(() => (location.hash = 'notes'));
       await until(page, async () => url().hash === '#notes');
-      await details.getByRole('button', { name: 'Close', exact: true }).click();
+      await closeButton.click();
       const back = await until(
         page,
         async () => (await showing('/list', false)()) && url().hash === '',
@@ -1819,8 +1831,7 @@ const routingChecks = (page, origin) => {
     // The source Context in the address (Codex, template #121): two Contexts
     // hold the same subject; reads and writes go to the one the address names.
     async 'source-named-in-links'() {
-      await page.goto(origin + '/');
-      await zenTitle.waitFor();
+      await overview();
       const href = await zenTitle.getAttribute('href');
       return { pass: href === withSource(work), href };
     },
@@ -1831,8 +1842,9 @@ const routingChecks = (page, origin) => {
       await title.fill('Personal copy, edited');
       await details.getByRole('button', { name: 'Save', exact: true }).click();
       await gone(details);
-      const personalNow = await stored(personal);
-      const workNow = await stored(work);
+      const tasks = await storedTasks(origin);
+      const personalNow = nameIn(tasks, personal);
+      const workNow = nameIn(tasks, work);
       return {
         pass:
           read === PERSONAL &&
@@ -1844,9 +1856,7 @@ const routingChecks = (page, origin) => {
       };
     },
     async 'source-action-route'() {
-      await page.goto(
-        origin + `${at}/postpone?context=${encodeURIComponent(personal)}`,
-      );
+      await page.goto(origin + withSource(personal, '/postpone'));
       const field = page
         .getByRole('dialog', { name: 'Not today' })
         .getByLabel('Title', { exact: true });
@@ -1886,15 +1896,6 @@ const routingChecks = (page, origin) => {
   };
 };
 
-/** Signs in on an address while signed out; the address survives sign-in. */
-async function signInAt(page, origin, address) {
-  await fetch(origin + '/__reset');
-  await page.goto(origin + address);
-  await page.getByLabel(/Pod address/).fill(origin + '/alice');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByLabel(/Data context/).selectOption({ label: 'work' });
-}
-
 /**
  * The routing matrix of the template's routing spike (#114, branch
  * claude/120-ui-spike, scripts/routing-gate.mjs): 29 checks of addresses,
@@ -1903,18 +1904,13 @@ async function signInAt(page, origin, address) {
  */
 async function routing({ browser, origin }) {
   const results = [];
-  const task = Buffer.from(origin + '/alice/tasks/1', 'utf8').toString(
-    'base64url',
-  );
-  const personal = encodeURIComponent(
-    origin + '/alice/_system/contexts/personal',
-  );
+  const { at, personal } = plumberTask(origin);
   const signedOut = [
-    ['direct-entry-signed-out', `/tasks/${task}`, PLUMBER],
+    ['direct-entry-signed-out', at, PLUMBER],
     [
       'source-signed-out',
-      `/tasks/${task}?context=${personal}`,
-      'Call the plumber (personal copy)',
+      `${at}?context=${encodeURIComponent(personal)}`,
+      PERSONAL,
     ],
     ['invalid-legacy-signed-out', '/?task=!!!', null],
   ];
@@ -1922,7 +1918,7 @@ async function routing({ browser, origin }) {
     const { context, page, errors } = await newPage(browser);
     results.push(
       await attempt(id, async () => {
-        await signInAt(page, origin, address);
+        await signIn(page, origin, address);
         let shows;
         if (expected === null)
           shows = /not valid/.test(
@@ -1937,8 +1933,7 @@ async function routing({ browser, origin }) {
           await field.waitFor();
           shows = (await field.inputValue()) === expected;
         }
-        const url = new URL(page.url());
-        const path = url.pathname + url.search;
+        const path = addressOf(page);
         return {
           pass: path === address && shows && errors.length === 0,
           path,

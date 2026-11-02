@@ -54,22 +54,17 @@ export interface Nav<P> {
   link(place: P): NavLinkProps;
 }
 
-/** The in-app place that opened an entry: its address and position. */
-interface Opened {
-  readonly opener: string;
-  readonly from: number;
-}
-
 /** What the router keeps about the session history of this document. */
 interface Session {
   /** The address the app shows; it changes only through the router. */
   shown: string;
   /** The position of the shown entry, kept in its `history.state`. */
   position: number;
-  /** What opened the shown entry, kept in its `history.state` too. */
-  opened?: Opened;
-  /** Set while the router undoes a declined step; it ignores that popstate. */
-  undoing: boolean;
+  /**
+   * The position of the in-app entry that opened the shown entry, kept in its
+   * `history.state` too; `close` goes back to it.
+   */
+  from?: number;
   /**
    * Set while the SDK decides about a Back or Forward. Further moves the
    * browser makes meanwhile start no second decision: the outcome applies to
@@ -95,22 +90,20 @@ const positionOf = () => {
   const position = entry().position;
   return typeof position === 'number' ? position : undefined;
 };
-const openedOf = (): Opened | undefined => {
-  const { opener, from } = entry();
-  return typeof opener === 'string' && typeof from === 'number'
-    ? { opener, from }
-    : undefined;
+const fromOf = () => {
+  const from = entry().from;
+  return typeof from === 'number' ? from : undefined;
 };
 /** The router's state for the shown entry, over what else the entry holds. */
 const stamp = (s: Session) => ({
   ...entry(),
   position: s.position,
-  ...s.opened,
+  ...(s.from === undefined ? {} : { from: s.from }),
 });
 /** Follows the entry the browser is on. */
 function sync(s: Session) {
   s.position = positionOf() ?? s.position;
-  s.opened = openedOf();
+  s.from = fromOf();
 }
 
 function current(): Session {
@@ -122,8 +115,7 @@ function current(): Session {
     session = {
       shown: here(),
       position: position ?? 0,
-      opened: openedOf(),
-      undoing: false,
+      from: fromOf(),
       deciding: false,
       frames: 0,
     };
@@ -142,7 +134,7 @@ function subscribe(listener: () => void) {
 }
 
 /**
- * Replaces the address in place, keeping the entry's position and opener.
+ * Replaces the address in place, keeping the entry's router state.
  * Pass it to `createBrowserRuntime({ replaceUrl })`, so the address the
  * runtime returns to after sign-in is the one the app shows.
  */
@@ -152,10 +144,11 @@ export function replaceUrl(url: string): void {
 }
 
 /**
- * An entry at the shown address: nothing to decide. A fragment link adds one
- * without the router's state, right after the shown entry; it takes the next
- * position, so the router's offsets keep matching the history, and the shown
- * entry's opener, so `close` still returns to it.
+ * An entry at the shown address: nothing to decide. It is the shown entry
+ * again, after a declined move was undone, or a fragment link's entry: that
+ * one has no router state and comes right after the shown entry, so it takes
+ * the next position, keeping the router's offsets in step with the history,
+ * and the shown entry's opener position, so `close` still returns to it.
  */
 function adopt(s: Session) {
   if (positionOf() !== undefined) sync(s);
@@ -165,28 +158,12 @@ function adopt(s: Session) {
   }
 }
 
+// Fragment navigations fire popstate too.
 function onPop() {
   const s = current();
-  if (s.undoing) {
-    s.undoing = false;
-    return;
-  }
   if (s.deciding) return;
   if (here() === s.shown) adopt(s);
   else void decide(s);
-}
-
-// A fragment navigation fires popstate in current browsers; hashchange
-// covers one that does not.
-function onHash() {
-  const s = current();
-  if (
-    !s.undoing &&
-    !s.deciding &&
-    here() === s.shown &&
-    positionOf() === undefined
-  )
-    adopt(s);
 }
 
 async function decide(s: Session) {
@@ -210,15 +187,13 @@ async function decide(s: Session) {
     if (here() !== s.shown) onPop();
     return;
   }
-  // Staying: back to the shown entry, keeping the history intact. An entry
-  // without the router's position cannot be measured; it shows the shown
-  // address again in place.
+  // Staying: back to the shown entry, keeping the history intact; its
+  // popstate is at the shown address and asks nothing. An entry without the
+  // router's position cannot be measured; it shows the shown address again
+  // in place.
   const target = positionOf();
   if (target === undefined) history.replaceState(stamp(s), '', s.shown);
-  else if (target !== s.position) {
-    s.undoing = true;
-    history.go(s.position - target);
-  }
+  else if (target !== s.position) history.go(s.position - target);
 }
 
 const plainClick = (event: MouseEvent<HTMLAnchorElement>) =>
@@ -236,7 +211,8 @@ const plainClick = (event: MouseEvent<HTMLAnchorElement>) =>
  * SDK's `navigate`, so an unsaved edit asks first, and staying keeps the
  * address, the screen and the history. A known address in another form is
  * replaced by its canonical form. Call it once, in the app's frame inside
- * `SempodsProvider`, and pass `nav` down.
+ * `SempodsProvider`, with a model that keeps its identity (a module-level
+ * constant), and pass `nav` down; it changes only with the place.
  */
 export function useNav<P>(model: AddressModel<P>): Nav<P> {
   const address = useSyncExternalStore(subscribe, () => current().shown);
@@ -250,14 +226,10 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
   useEffect(() => {
     const s = current();
     s.navigate = navigate;
-    if (s.frames++ === 0) {
-      addEventListener('popstate', onPop);
-      addEventListener('hashchange', onHash);
-    }
+    if (s.frames++ === 0) addEventListener('popstate', onPop);
     return () => {
       if (--s.frames > 0) return;
       removeEventListener('popstate', onPop);
-      removeEventListener('hashchange', onHash);
       s.navigate = undefined;
     };
   }, [navigate]);
@@ -272,9 +244,9 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
       void navigate(() => {
         if (options?.replace) history.replaceState(stamp(s), '', url);
         else {
-          s.opened = { opener: s.shown, from: s.position };
+          s.from = s.position;
           s.position += 1;
-          history.pushState({ position: s.position, ...s.opened }, '', url);
+          history.pushState({ position: s.position, from: s.from }, '', url);
         }
         show(here());
       });
@@ -284,8 +256,8 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
   const close = useCallback(
     (fallback: P) => {
       // Back to the opener, past any fragment entries of this screen.
-      const { opened, position } = current();
-      if (opened && opened.from < position) history.go(opened.from - position);
+      const { from, position } = current();
+      if (from !== undefined && from < position) history.go(from - position);
       else go(fallback, { replace: true });
     },
     [go],
@@ -301,5 +273,5 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
     }),
     [go, model],
   );
-  return { place, go, close, link };
+  return useMemo(() => ({ place, go, close, link }), [place, go, close, link]);
 }

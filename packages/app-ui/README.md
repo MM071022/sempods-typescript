@@ -373,8 +373,9 @@ screen, the draft and the history.
   parameters.
 - **`useNav(model)`** returns the shown `place` and:
   - `go(place, { replace })`: a new history entry, or in place;
-  - `close(fallback)`: back to the in-app place that opened the screen (kept
-    in `history.state`, also past the screen's fragment links), or after a
+  - `close(fallback)`: back to the in-app place that opened the screen (its
+    position is kept in `history.state`, so this also works past the screen's
+    fragment links), or after a
     direct entry to `fallback` in place;
   - `link(place)`: `href` and `onClick` for an `<a>`; a plain click switches
     in place, Ctrl/Cmd-, Shift- and middle clicks open the address in the
@@ -382,8 +383,9 @@ screen, the draft and the history.
 - **`replaceUrl`**: pass it to `createBrowserRuntime`, so the address the
   runtime returns to after sign-in is the one the app shows.
 
-Call `useNav` once, in the app's frame inside `SempodsProvider`, and pass
-`nav` down. While the SDK asks about a Back or Forward, further history moves
+Call `useNav` once, in the app's frame inside `SempodsProvider`, with a
+module-level address model, and pass `nav` down: it changes only with the
+place. While the SDK asks about a Back or Forward, further history moves
 start no second question; the answer applies to where the browser is when it
 comes. Leaving the document (Back past its first entry, reload, closing the
 tab) is not a router move: the SDK's `beforeunload` prompt covers it.
