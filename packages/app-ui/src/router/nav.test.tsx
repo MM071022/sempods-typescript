@@ -15,7 +15,10 @@ import type { AddressModel, Nav } from './nav.js';
 /** The pending decision of the stand-in navigate, or none: leave at once. */
 let ask: ((left: boolean) => void) | null = null;
 let asking = false;
+/** Resolves "left" without running the action, like a disposed runtime. */
+let skipping = false;
 const navigate = vi.fn((action: () => void) => {
+  if (skipping) return Promise.resolve(true);
   if (!asking) {
     action();
     return Promise.resolve(true);
@@ -28,7 +31,11 @@ const navigate = vi.fn((action: () => void) => {
     };
   });
 });
-vi.mock('@sempods/app-sdk/react', () => ({ useApp: () => ({ navigate }) }));
+/** The navigate the next mounted frame gets. */
+let frameNavigate = navigate;
+vi.mock('@sempods/app-sdk/react', () => ({
+  useApp: () => ({ navigate: frameNavigate }),
+}));
 
 type Place = { readonly page: string };
 const model: AddressModel<Place> = {
@@ -65,7 +72,9 @@ beforeAll(async () => {
 afterEach(() => {
   cleanup();
   asking = false;
+  skipping = false;
   ask = null;
+  frameNavigate = navigate;
 });
 
 /** Runs `action` and waits for the history event it causes. */
@@ -210,4 +219,47 @@ it('closes to the opener past a fragment entry of the screen', async () => {
     'list',
     task.position! - 1,
   ]);
+});
+
+it('follows moves made while no frame was mounted', () => {
+  render(<Frame />);
+  cleanup();
+  act(() => history.pushState({ position: 40 }, '', '/task'));
+  render(<Frame />);
+  expect([shown(), address()]).toEqual(['task', '/task']);
+  act(() => nav.go({ page: 'list' }));
+  expect(state()).toEqual({ position: 41, from: 40 });
+});
+
+it('compares addresses as the browser keeps them', () => {
+  render(<Frame />);
+  act(() => nav.go({ page: 'li st' }));
+  expect(address()).toBe('/li%20st');
+  const length = history.length;
+  act(() => nav.go({ page: 'li st' }));
+  expect(history.length).toBe(length);
+});
+
+it("asks a remaining frame's navigate after another frame unmounts", async () => {
+  render(<Frame />);
+  act(() => nav.go({ page: 'task' }));
+  const other = vi.fn((action: () => void) => navigate(action));
+  frameNavigate = other;
+  const second = render(<Frame />);
+  second.unmount();
+  navigate.mockClear();
+  await traverse(-1);
+  expect(other).not.toHaveBeenCalled();
+  expect(navigate).toHaveBeenCalledTimes(1);
+});
+
+it('decides once when navigate leaves without running the move', async () => {
+  render(<Frame />);
+  act(() => nav.go({ page: 'task' }));
+  skipping = true;
+  navigate.mockClear();
+  await traverse(-1);
+  await act(async () => {});
+  expect(navigate).toHaveBeenCalledTimes(1);
+  expect(shown()).toBe('task');
 });

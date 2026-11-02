@@ -420,11 +420,15 @@ export type Place =
 const absolute = (value: string) => /^https?:\/\/\S+$/.test(value);
 
 /** A subject IRI as one path segment: UTF-8 in base64url. */
-const encode = (iri: string) =>
-  btoa(String.fromCharCode(...new TextEncoder().encode(iri)))
+function encode(iri: string): string {
+  let binary = '';
+  for (const byte of new TextEncoder().encode(iri))
+    binary += String.fromCharCode(byte);
+  return btoa(binary)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
+}
 function decode(id: string): string | null {
   if (!/^[\w-]+$/.test(id)) return null;
   try {
@@ -687,6 +691,10 @@ evidence from a real Pod, an installed PWA, iOS or a human test.
   app can create; an app's own theme needs its own check.
 - The router does not protect leaving the document: Back past its first
   entry, a reload or closing the tab is the SDK's `beforeunload` prompt.
+- History entries that other code writes with `pushState` carry no router
+  position, and the History API cannot measure their distance. Staying on
+  one shows the shown address again in place, and later Back and Forward
+  decisions count that entry as the shown one.
 - The UI layer adds about 97 KB of gzipped JavaScript to an app (measured in
   the spike with the same components).
 

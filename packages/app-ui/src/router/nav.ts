@@ -71,10 +71,11 @@ interface Session {
    * where the browser is when it ends, never to an earlier target.
    */
   deciding: boolean;
-  /** The SDK's `navigate` of the mounted frame. */
-  navigate?: (action: () => void) => Promise<boolean>;
-  /** Mounted `useNav` calls; the history listeners exist while any is. */
-  frames: number;
+  /**
+   * The SDK's `navigate` of each mounted `useNav` call, the latest last; the
+   * history listener exists while any is mounted.
+   */
+  frames: ((action: () => void) => Promise<boolean>)[];
 }
 
 // Created on first use, so importing the package touches no browser global.
@@ -82,6 +83,11 @@ let session: Session | undefined;
 const listeners = new Set<() => void>();
 
 const here = () => location.pathname + location.search;
+/** An address as the browser keeps it, so it compares with `here()`. */
+const normal = (address: string) => {
+  const url = new URL(address, location.href);
+  return url.pathname + url.search;
+};
 const entry = (): Readonly<Record<string, unknown>> =>
   history.state !== null && typeof history.state === 'object'
     ? (history.state as Record<string, unknown>)
@@ -117,7 +123,7 @@ function current(): Session {
       position: position ?? 0,
       from: fromOf(),
       deciding: false,
-      frames: 0,
+      frames: [],
     };
   }
   return session;
@@ -161,6 +167,8 @@ function adopt(s: Session) {
 // Fragment navigations fire popstate too.
 function onPop() {
   const s = current();
+  // A fragment link's entry is counted even while the SDK asks.
+  if (here() === s.shown && positionOf() === undefined) return adopt(s);
   if (s.deciding) return;
   if (here() === s.shown) adopt(s);
   else void decide(s);
@@ -170,21 +178,23 @@ async function decide(s: Session) {
   s.deciding = true;
   // Without a mounted frame there is no leave policy to ask.
   const navigate =
-    s.navigate ??
+    s.frames.at(-1) ??
     (async (action: () => void) => {
       action();
       return true;
     });
+  let moved = false;
   // A refused or failed decision stays.
   const left = await navigate(() => {
     // Leaving: show the entry the browser is on now.
+    moved = true;
     sync(s);
     show(here());
   }).catch(() => false);
   s.deciding = false;
   if (left) {
     // The browser moved on after the decision applied: decide again.
-    if (here() !== s.shown) onPop();
+    if (moved && here() !== s.shown) onPop();
     return;
   }
   // Staying: back to the shown entry, keeping the history intact; its
@@ -225,20 +235,23 @@ export function useNav<P>(model: AddressModel<P>): Nav<P> {
   }, [address, model]);
   useEffect(() => {
     const s = current();
-    s.navigate = navigate;
-    if (s.frames++ === 0) addEventListener('popstate', onPop);
+    if (s.frames.push(navigate) === 1) {
+      // Moves while no frame listened: follow the entry the browser is on.
+      sync(s);
+      if (here() !== s.shown) show(here());
+      addEventListener('popstate', onPop);
+    }
     return () => {
-      if (--s.frames > 0) return;
-      removeEventListener('popstate', onPop);
-      s.navigate = undefined;
+      s.frames.splice(s.frames.lastIndexOf(navigate), 1);
+      if (s.frames.length === 0) removeEventListener('popstate', onPop);
     };
   }, [navigate]);
   useEffect(() => {
-    if (address !== canonical) replaceUrl(canonical);
+    if (address !== normal(canonical)) replaceUrl(canonical);
   }, [address, canonical]);
   const go = useCallback(
     (next: P, options?: { readonly replace?: boolean }) => {
-      const url = model.format(next);
+      const url = normal(model.format(next));
       const s = current();
       if (url === s.shown) return;
       void navigate(() => {

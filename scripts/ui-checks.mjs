@@ -69,10 +69,46 @@ async function signIn(page, origin, address = '/') {
   await page
     .getByLabel(/Data context|Datenkontext/)
     .selectOption({ label: 'work' });
-  await page
+  await loaded(page);
+}
+
+/**
+ * Waits until the page shows the Pod's tasks, so its connection and Context
+ * catalogue reads are done. WebKit reports a read that a navigation cancels
+ * as a page error.
+ */
+function loaded(page) {
+  return page
     .locator('.zen-title, .gate-list a')
     .first()
     .waitFor({ timeout: 15000 });
+}
+
+/** Types the edit at the end of the task's title, as a person does. */
+async function typeEdit(page, title) {
+  await title.click();
+  await title.press('End');
+  await page.keyboard.type(EDIT);
+}
+
+/** Whether the task's title still ends with the edit. */
+async function editKept(title) {
+  return (await title.inputValue({ timeout: 2000 }).catch(() => '')).endsWith(
+    EDIT,
+  );
+}
+
+/** Answers the SDK's leave question, if it asks: keep editing, or discard. */
+async function answerLeave(page, choice) {
+  const confirm = page.getByRole('alertdialog');
+  const asked = await shown(confirm, 3000);
+  if (asked) {
+    const buttons = confirm.getByRole('button');
+    await (choice === 'keep' ? buttons.first() : buttons.last()).click();
+    await hidden(confirm);
+    await settle(page);
+  }
+  return asked;
 }
 
 /** Runs one check; an exception is a failure with its first line as note. */
@@ -87,6 +123,17 @@ async function attempt(id, run, extra = {}) {
       note: 'error: ' + error.message.split('\n')[0],
     };
   }
+}
+
+/**
+ * Runs one check on a shared page; the page errors that arrive while it runs
+ * name it. One that a check leaves pending can arrive under the next one.
+ */
+async function attemptOn(errors, id, run) {
+  const from = errors.length;
+  const result = await attempt(id, run);
+  for (let i = from; i < errors.length; i++) errors[i] = `${id}: ${errors[i]}`;
+  return result;
 }
 
 /**
@@ -451,9 +498,7 @@ const gateChecks = {
     await c.dirty();
     const address = addressOf(page);
     await page.goBack();
-    const asked = await shown(c.confirm, 3000);
-    if (asked) await c.confirm.getByRole('button').first().click();
-    await hidden(c.confirm);
+    const asked = await answerLeave(page, 'keep');
     await page.waitForTimeout(300);
     const s = await c.state();
     const kept = addressOf(page) === address;
@@ -469,8 +514,7 @@ const gateChecks = {
     await c.open();
     await c.dirty();
     await page.goBack();
-    const asked = await shown(c.confirm, 3000);
-    if (asked) await c.confirm.getByRole('button').last().click();
+    const asked = await answerLeave(page, 'discard');
     await hidden(c.dialog);
     const s = await c.state();
     const left = !new URL(page.url()).pathname.startsWith('/tasks/');
@@ -497,22 +541,14 @@ async function gate({ browser, origin, engine }) {
     confirm: page.getByRole('alertdialog'),
     title: page.getByLabel('Title', { exact: true }),
     open: () => openTask(page),
-    async dirty() {
-      await c.title.click();
-      await c.title.press('End');
-      await page.keyboard.type(EDIT);
-    },
+    dirty: () => typeEdit(page, c.title),
     async state() {
       await settle(page);
       const dialogOpen = await c.dialog.isVisible();
       return {
         dialogOpen,
         confirmOpen: await c.confirm.isVisible(),
-        draftKept: dialogOpen
-          ? (
-              await c.title.inputValue({ timeout: 2000 }).catch(() => '')
-            ).endsWith(EDIT)
-          : false,
+        draftKept: dialogOpen ? await editKept(c.title) : false,
         focus: await focusInfo(page),
       };
     },
@@ -523,7 +559,7 @@ async function gate({ browser, origin, engine }) {
     await page.goto(origin + '/');
     await page.locator('.zen-title').waitFor();
     await fetch(origin + '/__reset');
-    results.push(await attempt(id, () => run(c, page)));
+    results.push(await attemptOn(errors, id, () => run(c, page)));
   }
   results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
   await context.close();
@@ -1484,8 +1520,7 @@ const routingChecks = (page, origin) => {
     path() === expected && (await details.isVisible()) === open;
   /** On the task's address with its dialog open. */
   const onTask = async () => pathname() === at && (await title.isVisible());
-  const draft = () => title.inputValue({ timeout: 2000 }).catch(() => '');
-  const dirty = async () => title.fill((await title.inputValue()) + EDIT);
+  const dirty = () => typeEdit(page, title);
   const overview = async () => {
     await page.goto(origin + '/');
     await zenTitle.waitFor();
@@ -1511,17 +1546,7 @@ const routingChecks = (page, origin) => {
     await plumberLink.click();
     await title.waitFor();
   };
-  /** Answers the SDK's leave question: keep editing, or discard. */
-  const answer = async (choice) => {
-    const asked = await shown(confirm, 3000);
-    if (asked) {
-      const buttons = confirm.getByRole('button');
-      await (choice === 'keep' ? buttons.first() : buttons.last()).click();
-      await hidden(confirm);
-      await settle(page);
-    }
-    return asked;
-  };
+  const answer = (choice) => answerLeave(page, choice);
   /** The task's name in a Context, among the stored tasks. */
   const nameIn = (tasks, context) =>
     tasks.find((t) => t.context === context && t.body['@id'] === task)?.body[
@@ -1610,7 +1635,7 @@ const routingChecks = (page, origin) => {
       await page.goBack();
       const asked = await answer('keep');
       const stayed = await until(page, async () => pathname() === at);
-      const kept = (await draft()).endsWith(EDIT);
+      const kept = await editKept(title);
       return {
         pass: asked && stayed && kept,
         asked,
@@ -1651,6 +1676,7 @@ const routingChecks = (page, origin) => {
     async 'not-found-and-invalid'() {
       await page.goto(origin + '/nowhere');
       const unknown = await notFound.textContent().catch(() => null);
+      await loaded(page);
       await page.goto(origin + '/tasks/!!!');
       const invalid = await notFound.textContent().catch(() => null);
       return {
@@ -1687,19 +1713,14 @@ const routingChecks = (page, origin) => {
       const asked = await answer('discard');
       const settled = await until(page, consistent);
       const state = { path: pathname(), open: await details.isVisible() };
-      const value = state.open ? await draft() : null;
+      const kept = state.open && (await editKept(title));
       await page.goBack();
       const left = await until(page, showing('/', false));
       const askedAgain = await confirm.isVisible();
       return {
-        pass:
-          asked &&
-          settled &&
-          !(value ?? '').endsWith(EDIT) &&
-          left &&
-          !askedAgain,
+        pass: asked && settled && !kept && left && !askedAgain,
         state,
-        draft: value,
+        draftKept: kept,
         askedAgain,
       };
     },
@@ -1710,7 +1731,7 @@ const routingChecks = (page, origin) => {
       await confirm.waitFor({ timeout: 3000 });
       await page.goForward();
       const asked = await answer('keep');
-      const kept = (await draft()).endsWith(EDIT);
+      const kept = await editKept(title);
       const stayed = await until(page, onTask);
       // The history still works: Back asks again.
       await page.goBack();
@@ -1732,7 +1753,7 @@ const routingChecks = (page, origin) => {
       await page.goBack();
       const asked = await answer('keep');
       const stayed = await until(page, onTask);
-      const kept = (await draft()).endsWith(EDIT);
+      const kept = await editKept(title);
       return { pass: asked && stayed && kept, draftKept: kept, path: path() };
     },
     async 'repeated-back-discard'() {
@@ -1784,7 +1805,7 @@ const routingChecks = (page, origin) => {
         async () =>
           pathname() === at && url().hash === '' && (await consistent()),
       );
-      const kept = (await draft()).endsWith(EDIT);
+      const kept = await editKept(title);
       return {
         pass: asked && stayed && kept,
         asked,
@@ -1822,6 +1843,7 @@ const routingChecks = (page, origin) => {
       const creation = page.getByRole('dialog', { name: 'New task' });
       await page.goto(origin + '/tasks/add');
       const add = await shown(creation);
+      await loaded(page);
       await page.goto(origin + '/tasks/new');
       const legacy = await shown(creation);
       const canonical = await until(page, async () => path() === '/tasks/add');
@@ -1948,8 +1970,10 @@ async function routing({ browser, origin }) {
   page.on('dialog', (dialog) => void dialog.accept().catch(() => {}));
   await signIn(page, origin);
   for (const [id, run] of Object.entries(routingChecks(page, origin))) {
+    // The previous check's page finishes its reads before the next navigation.
+    await loaded(page).catch(() => {});
     await fetch(origin + '/__reset');
-    results.push(await attempt(id, run));
+    results.push(await attemptOn(errors, id, run));
   }
   results.push({ id: 'no-page-errors', pass: errors.length === 0, errors });
   await context.close();
