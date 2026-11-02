@@ -6,7 +6,9 @@ automatic conversion of legacy app data or stored credentials.
 
 ## From 0.6.0 to 0.7.0
 
-0.7.0 is not released yet; this section collects its upgrade steps.
+0.7.0 is not released yet; this section collects its upgrade steps. Most apps
+need no code change. Check the cascade layers below first, then the behaviour
+changes.
 
 ### SDK styles in a cascade layer
 
@@ -35,6 +37,40 @@ gave way to such rules.
 Eight optional tokens map a UI kit's field border, the surface, text and border
 of the main and the other actions, and the focus ring onto SDK surfaces; without
 them nothing changes. A hovered main action now mixes its text into its surface.
+
+### Behaviour changes
+
+- **Leave prompt.** While a draft, a pending write or an unconfirmed write is
+  left, reloading, closing the tab, typing an address or going Back past the
+  app shows the browser's leave prompt
+  ([selection and draft lifetime](react-authoring.md#selection-and-draft-lifetime)).
+  End-to-end tests that leave the page with unsaved work must accept or
+  dismiss the `beforeunload` dialog. Browsers show it only after the person
+  has interacted with the page, so a test that waits for it without a prior
+  click or key press can time out. Playwright runs the handler on closing a
+  tab only with `page.close({ runBeforeUnload: true })`. An app that keeps drafts across reloads
+  itself can pass `unloadPrompt={false}` to `SempodsProvider` (or
+  `{ unloadPrompt: false }` to `createAppController`); keep it fixed.
+- **Escape in `ResourceEditor` with `onClose`.** With unsaved changes, Escape
+  now asks before discarding, like closing the surrounding dialog; without
+  changes it closes at once. Escape in the editor, in its fields and on its
+  own buttons, no longer reaches enclosing React handlers, so an app dialog
+  around it does not close on the same key. Remove app workarounds that
+  caught Escape around the editor.
+- **Management on phones.** Up to 30rem wide, `AppAccess`'s Pods & sharing
+  dialog is a full-width bottom sheet; wider screens keep it centred. Recheck
+  app styles that positioned it.
+
+### Type additions
+
+- `Field` from `@sempods/client-sdk/edit` gains the `date` kind. An exhaustive
+  `switch` over `field.kind` needs a `'date'` case.
+- `SnapshotList` (and `useList`'s and `usePodList`'s data) gains
+  `skippedRecords`. Test fixtures that build these objects by hand need the
+  property, usually `[]`.
+- `AppActions` (from `useApp()`) gains the required method `selectTarget`
+  ([one chooser across Pods](react-authoring.md#one-chooser-across-pods)).
+  Typed test doubles of `useApp()` need it too.
 
 ## From 0.5.0 to 0.6.0
 
