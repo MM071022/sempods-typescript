@@ -58,8 +58,9 @@ beforeEach(() => {
   );
   file(
     'docs/quickstart.md',
-    '# Quickstart\n\n## Run it\n\n[entry](ai-app-builder.md)\n',
+    '# Quickstart\n\n## Run it\n\n[entry](ai-app-builder.md) [notes](releases/9.9.0.md)\n',
   );
+  file('docs/releases/9.9.0.md', '# SDK 9.9.0\n');
   file('examples/demo/src/app.tsx', "import './domain.ts';\n");
   file('examples/demo/src/domain.ts', 'export {};\n');
   file(
@@ -77,6 +78,7 @@ describe('the shipped reference', () => {
     assert.deepEqual(referenceFiles(root), [
       'docs/ai-app-builder.md',
       'docs/quickstart.md',
+      'docs/releases/9.9.0.md',
       'examples/demo/README.md',
       'examples/demo/package.json',
       'examples/demo/src/app.tsx',
@@ -179,6 +181,72 @@ describe('checking an extracted reference', () => {
     assert.ok(
       checkReference(pkg).some((e) => e.includes('workspace dependency')),
     );
+  });
+
+  it('reports a release without the notes of its minor version', () => {
+    rmSync(join(pkg, 'docs/releases/9.9.0.md'));
+    writeFileSync(
+      join(pkg, 'docs/quickstart.md'),
+      '# Quickstart\n\n## Run it\n\n[entry](ai-app-builder.md)\n',
+    );
+    assert.ok(
+      checkReference(pkg).some((e) =>
+        e.includes('Missing docs/releases/9.9.0.md for release 9.9.9'),
+      ),
+    );
+  });
+
+  it('reports release notes still in preparation', () => {
+    writeFileSync(
+      join(pkg, 'docs/releases/9.9.0.md'),
+      '# SDK 9.9.0 (in preparation)\n',
+    );
+    assert.ok(
+      checkReference(pkg).some((e) => e.includes('still in preparation')),
+    );
+  });
+
+  it('reports a migration section that still calls the release unreleased', () => {
+    const guide = (state) =>
+      [
+        '# Upgrade',
+        '',
+        '## From 9.9.0 to 9.10.0',
+        '',
+        '9.10.0 is not released yet; this section collects its steps.',
+        '',
+        '## From 9.8.0 to 9.9.0',
+        '',
+        state,
+        '',
+        '## From 9.7.0 to 9.8.0',
+        '',
+        'Older steps.',
+        '',
+      ].join('\n');
+    writeFileSync(
+      join(pkg, 'docs/migration.md'),
+      guide('9.9.0 is not released yet; this section collects its steps.'),
+    );
+    assert.ok(
+      checkReference(pkg).some((e) =>
+        e.includes('docs/migration.md: the section for 9.9.0 still calls it'),
+      ),
+    );
+    // The next version's section may stay unreleased; this one is done.
+    writeFileSync(
+      join(pkg, 'docs/migration.md'),
+      guide('Upgrade both packages. See the release notes.'),
+    );
+    assert.deepEqual(checkReference(pkg), []);
+  });
+
+  it('accepts a prerelease without its notes', () => {
+    writeFileSync(
+      join(pkg, 'package.json'),
+      '{ "name": "@sempods/app-sdk", "version": "9.10.0-dev.1" }\n',
+    );
+    assert.deepEqual(checkReference(pkg), []);
   });
 
   it('reports shipped contributor instructions', () => {
