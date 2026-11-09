@@ -57,7 +57,8 @@ export type SessionFact =
       readonly forget?: true;
       /**
        * The saved session is kept: restoring it failed only because its Pod
-       * could not be reached (offline, `5xx`, `408`, `429`), or a renewal
+       * could not be reached (offline, `5xx`, `408`, `429`, or no answer to
+       * its discovery within 15 seconds), or a renewal
        * lost its answer while the browser is offline (`problem: 'network'`).
        * The runtime restores it again when the browser comes back online, or
        * on `retryRestore(id)`. This is not a sign-out; offer a retry, not a
@@ -242,6 +243,8 @@ export interface BrowserRuntime {
    * if retirement fails, or (disconnected) if this runtime was disposed.
    * Concurrent default connects share discovery; connecting never starts login.
    * Outside-list URLs reject with RuntimeError (configuration) before discovery.
+   * A discovery that has not answered after 15 seconds rejects with
+   * RuntimeError (network). Never waits for another connection's restoration.
    */
   connect(url?: string): Promise<Connection>;
   beginAuthorization(id: string): Promise<void>;
