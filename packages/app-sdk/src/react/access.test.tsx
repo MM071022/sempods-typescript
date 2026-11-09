@@ -745,6 +745,16 @@ it.each(['select', 'disconnect'] as const)(
       await act(async () =>
         screen.getByRole('button', { name: 'Sign out' }).click(),
       );
+    // Signed out, Bob's Pod stays remembered; the gate closes as it starts.
+    await waitFor(() =>
+      expect(
+        runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
+      ).toMatchObject(
+        action === 'select'
+          ? { kind: 'ended', problem: 'login-required' }
+          : { kind: 'signed-out', problem: 'disconnected' },
+      ),
+    );
     await waitFor(() =>
       expect(document.querySelector('[data-sempods-ui="gate"]')).toBeNull(),
     );
@@ -758,14 +768,6 @@ it.each(['select', 'disconnect'] as const)(
       expect(prompts[0]!.textContent).toContain('pod.example/bob');
       expect(screen.getAllByText(message)).toHaveLength(1);
     } else expect(prompts).toEqual([]);
-    // Signed out, Bob's Pod stays remembered.
-    expect(
-      runtime.getSnapshot().find((c) => c.id === bob.id)?.session,
-    ).toMatchObject(
-      action === 'select'
-        ? { kind: 'ended', problem: 'login-required' }
-        : { kind: 'signed-out', problem: 'disconnected' },
-    );
   },
 );
 
