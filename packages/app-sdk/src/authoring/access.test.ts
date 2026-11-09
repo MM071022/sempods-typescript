@@ -45,8 +45,8 @@ const facts = (overrides: Partial<Facts> = {}): Facts => ({
 /** One derivation's prompts without their opaque ids. */
 function shape(prompt: AccessPrompt | null) {
   if (!prompt) return null;
-  const rest: Partial<AccessPrompt> = { ...prompt };
-  delete rest.id;
+  const { id, ...rest } = prompt;
+  void id;
   return rest;
 }
 const derive = (f: Facts) => createAccessTracker().derive(f);
