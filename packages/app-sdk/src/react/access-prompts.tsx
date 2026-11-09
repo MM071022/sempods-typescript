@@ -16,6 +16,7 @@ import { useAppFacts, useAppState, useController } from './app.js';
 import { useSdkLocale } from './locale.js';
 import { podName } from './names.js';
 import { layered, SdkStyles } from './styles.js';
+import { useFirst } from './first.js';
 
 const selectAccess = (s: AppSnapshot) => s.access;
 
@@ -235,7 +236,9 @@ function TimedPrompt({
 export function AccessPrompts() {
   const { blocking, prompts } = useAccessPrompts();
   const { direction } = useSdkLocale();
-  const shown = blocking ? [] : prompts;
+  // One stack per provider, also with several AppAccess instances.
+  const first = useFirst('prompts');
+  const shown = blocking || !first ? [] : prompts;
   return (
     <div
       data-sempods-ui="prompts"

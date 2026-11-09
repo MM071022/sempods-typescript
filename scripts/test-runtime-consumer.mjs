@@ -1317,6 +1317,7 @@ try {
         origin + '/app?identity=signout-' + surface + '-' + language;
       const signIn = language === 'en' ? 'Sign in' : 'Anmelden';
       const signOut = language === 'en' ? 'Sign out' : 'Abmelden';
+      const tryAgain = language === 'en' ? 'Try again' : 'Erneut versuchen';
       const message =
         language === 'en'
           ? 'Sign-out was not saved on this device. Try signing out again.'
@@ -1347,10 +1348,12 @@ try {
           },
         });
       });
-      const retry = page.getByRole('button', { name: signOut, exact: true });
-      await retry.click();
-      const notice = page.getByRole('alert');
+      await page.getByRole('button', { name: signOut, exact: true }).click();
+      // The gate offers the retry of the sign-out, never a sign-in (#238).
+      const gate = page.locator('[data-sempods-ui="gate"]');
+      const notice = gate.getByRole('alert');
       await notice.waitFor();
+      const retry = gate.getByRole('button', { name: tryAgain, exact: true });
       assert.equal(await notice.textContent(), message);
       assert.equal(await page.getByText(message, { exact: true }).count(), 1);
       assert.equal(
@@ -1359,10 +1362,7 @@ try {
           .textContent(),
         'failed',
       );
-      assert.equal(
-        await retry.getAttribute('aria-describedby'),
-        await notice.getAttribute('id'),
-      );
+      assert.equal(await gate.getByRole('button').count(), 1);
       assert.doesNotMatch(
         await page.locator('body').innerText(),
         /reload|neu laden|fixture storage/i,

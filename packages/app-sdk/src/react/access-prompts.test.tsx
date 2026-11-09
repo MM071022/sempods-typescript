@@ -492,3 +492,28 @@ it('shows no prompt and no gate while startup settles and a saved session restor
   expect(state.access.pending).toBe(false);
   expect(gate()).toBeNull();
 });
+
+it('shows one gate and one prompt stack for several AppAccess instances', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  const view = render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess appName="Tasks" />
+      <dialog>
+        <AppAccess appName="Tasks" />
+      </dialog>
+    </SempodsProvider>,
+  );
+  await findGate('no-connection');
+  expect(document.querySelectorAll('[data-sempods-ui="gate"]')).toHaveLength(1);
+  // The first instance holds them; unmounting it hands them to the other.
+  view.rerender(
+    <SempodsProvider runtime={f.runtime}>
+      <dialog>
+        <AppAccess appName="Tasks" />
+      </dialog>
+    </SempodsProvider>,
+  );
+  await findGate('no-connection');
+  expect(document.querySelectorAll('[data-sempods-ui="gate"]')).toHaveLength(1);
+});

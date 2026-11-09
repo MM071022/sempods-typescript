@@ -38,6 +38,7 @@ import {
   PromptActions,
   usePromptText,
 } from './access-prompts.js';
+import { useFirst } from './first.js';
 
 /** What a replacement for the connection view (`components.Connections`) receives. */
 export interface ConnectionsProps {
@@ -398,7 +399,11 @@ function Gate(
     Partial<Pick<AppAccessProps, 'appName'>>,
 ) {
   const blocking = useAppFacts(selectBlocking);
-  return blocking ? <GateDialog {...props} blocking={blocking} /> : null;
+  // One gate per provider, also with several AppAccess instances.
+  const first = useFirst('gate');
+  return blocking && first ? (
+    <GateDialog {...props} blocking={blocking} />
+  ) : null;
 }
 
 function GateDialog({
