@@ -136,8 +136,9 @@ nothing and stays signed in), rediscovery for a
 [lost renewal answer](#lost-renewal-answers), `connect(url)` (rejects),
 `beginAuthorization(id)` (rejects, nothing reset) and a callback's code claim
 (fails before the attempt is claimed). A late answer is dropped: it publishes
-nothing and installs no credentials, also after a disconnect or dispose. Token
-requests and client registration are not covered by this deadline, and no
+nothing and installs no credentials, also after a disconnect or dispose, which
+stop the wait at once (`disconnected`). A timeout reports no `failure` detail.
+Token requests and client registration are not covered by this deadline, and no
 refresh or code exchange is replayed.
 
 A restoration that cannot reach its Pod (offline, `5xx`, `408`, `429` or no

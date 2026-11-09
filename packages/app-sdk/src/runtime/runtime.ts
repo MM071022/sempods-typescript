@@ -173,21 +173,22 @@ export function createBrowserRuntime(
    * giving up is safe: a Pod that has not answered after 15 seconds is
    * unreachable (`RuntimeError('network')`, transient like an offline Pod),
    * not loading. A late answer is dropped, also for a fetch that ignores its
-   * signal; `signal` (a lifetime) cancels as before.
+   * signal. An aborted `signal` (a lifetime) rejects with `disconnected`.
    */
   async function discover(url: string, signal?: AbortSignal) {
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), DISCOVERY_TIMEOUT);
     const combined = combineSignals(signal, deadline.signal);
     try {
-      // Only the deadline stops waiting here; a lifetime ends discovery itself.
       return await waitFor(
         discoverPod(url, { ...protocol, signal: combined.signal }),
-        deadline.signal,
+        combined.signal,
       );
     } catch (error) {
-      if (deadline.signal.aborted && !signal?.aborted)
-        throw new RuntimeError('network');
+      // An ended lifetime (sign-out, a new sign-in, dispose) stops waiting at
+      // once, whether or not the fetch honours its signal.
+      if (signal?.aborted) throw new RuntimeError('disconnected');
+      if (deadline.signal.aborted) throw new RuntimeError('network');
       throw error;
     } finally {
       clearTimeout(timer);

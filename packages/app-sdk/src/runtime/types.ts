@@ -247,6 +247,13 @@ export interface BrowserRuntime {
    * RuntimeError (network). Never waits for another connection's restoration.
    */
   connect(url?: string): Promise<Connection>;
+  /**
+   * Prepares a sign-in (discovery, client resolution, the stored attempt)
+   * while the current session keeps working, then navigates to the Pod's
+   * provider. A discovery that has not answered after 15 seconds rejects
+   * with RuntimeError (network), and a sign-out or dispose meanwhile with
+   * RuntimeError (disconnected); neither resets the connection.
+   */
   beginAuthorization(id: string): Promise<void>;
   /**
    * Signs out on this device: blocks this connection locally, then removes its

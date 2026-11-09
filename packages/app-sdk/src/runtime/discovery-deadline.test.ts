@@ -106,6 +106,11 @@ async function stalled() {
     runtime,
     alice,
     bob: bobId,
+    held,
+    /** Lets new discovery requests through; held ones stay pending. */
+    unstall() {
+      state.stalled = false;
+    },
     release() {
       state.stalled = false;
       held.splice(0).forEach((hold) => hold.resolve());
@@ -222,11 +227,16 @@ it('keeps per-connection and global actions available while another Pod restores
 });
 
 it('lets a sign-in of the restoring connection win over its pending restoration', async () => {
-  const { runtime, alice, release } = await stalled();
-  // Preparing the sign-in needs its own discovery, which answers.
-  release();
+  const { runtime, alice, held, unstall, release } = await stalled();
+  // Preparing the sign-in needs its own discovery, which answers; the
+  // restoration's discovery stays pending.
+  unstall();
   await runtime.beginAuthorization(alice);
   expect(session(runtime, alice)?.kind).toBe('leaving');
+  expect(held.length).toBeGreaterThan(0);
+  // The restoration's discovery answers late, then its deadline passes.
+  release();
+  await flush();
   await vi.advanceTimersByTimeAsync(15_000);
   await flush();
   // The earlier restoration publishes nothing over the stored attempt.
@@ -294,4 +304,101 @@ it('rejects a connect whose discovery never settles, adding no connection', asyn
   await vi.advanceTimersByTimeAsync(15_000);
   await outcome;
   expect(f.runtime.getSnapshot()).toEqual([]);
+});
+
+/** A signed-in runtime whose Pod's discovery stalls once `stall` is called. */
+async function signedIn() {
+  const f = fixture({ preferences: null });
+  keep(f.runtime);
+  const { runtime, id } = await f.login();
+  keep(runtime);
+  const original = f.fetch.getMockImplementation()!;
+  const state = { stalled: false };
+  f.fetch.mockImplementation(async (url, init) =>
+    state.stalled && url.includes('/.well-known/')
+      ? new Promise<Response>(() => {})
+      : original(url, init),
+  );
+  return { f, runtime, id, state };
+}
+
+it('rejects a sign-in whose discovery never settles, resetting nothing', async () => {
+  const { f, runtime, id, state } = await signedIn();
+  state.stalled = true;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const navigations = f.navigate.mock.calls.length;
+  const begun = runtime.beginAuthorization(id);
+  const outcome = expect(begun).rejects.toMatchObject({ problem: 'network' });
+  await vi.advanceTimersByTimeAsync(15_000);
+  await outcome;
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('active');
+  expect(f.navigate).toHaveBeenCalledTimes(navigations);
+  expect(await runtime.bindPod(id).sparql.construct(query)).toMatchObject({
+    kind: 'ok',
+  });
+});
+
+it('stops waiting for a stalled sign-in discovery at once when the person signs out', async () => {
+  const { runtime, id, state } = await signedIn();
+  state.stalled = true;
+  const begun = runtime.beginAuthorization(id);
+  const outcome = expect(begun).rejects.toMatchObject({
+    problem: 'disconnected',
+  });
+  await flush();
+  await runtime.disconnect(id);
+  await outcome;
+  expect(runtime.getSnapshot()[0]?.session.kind).toBe('signed-out');
+});
+
+it('fails a callback whose discovery never settles before claiming its attempt', async () => {
+  const f = fixture({ preferences: null });
+  keep(f.runtime);
+  const { connection } = await f.begin();
+  f.runtime.dispose();
+  await settleLease();
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url, init) =>
+    url.includes('/.well-known/')
+      ? new Promise<Response>(() => {})
+      : original(url, init),
+  );
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const returned = keep(f.returned());
+  const report = returned.initialize();
+  await flush();
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await report).toMatchObject({
+    interaction: 'failed',
+    problem: 'network',
+    attemptConnectionId: connection.id,
+  });
+  // The attempt was not claimed: its code was never sent.
+  expect(f.count('/token')).toBe(0);
+  expect(
+    (await savedRecords(f.factory)).find((r) => r.id === connection.id)?.value,
+  ).toMatchObject({ kind: 'authorizing' });
+});
+
+it('waits restorable when the probe before the resend of a lost renewal answer stalls', async () => {
+  const { f, runtime, id, state } = await signedIn();
+  f.setToken(async () => {
+    // The answer is lost; the probe that follows never settles.
+    state.stalled = true;
+    throw new TypeError('Failed to fetch');
+  });
+  let refusals = 1;
+  f.setQuery(async () => (refusals-- > 0 ? unauthorized() : Response.json([])));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const read = runtime.bindPod(id).sparql.construct(query);
+  await until(() => expect(state.stalled).toBe(true));
+  await flush();
+  await vi.advanceTimersByTimeAsync(15_000);
+  await read;
+  expect(runtime.getSnapshot()[0]?.session).toEqual({
+    kind: 'ended',
+    problem: 'network',
+    restorable: true,
+  });
+  expect(f.count('/token')).toBe(2);
 });
