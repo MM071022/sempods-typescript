@@ -33,20 +33,21 @@ const texts = {
   },
 };
 
-function useDescribe() {
+function useValues() {
   // The provider's formatters: pass `timeZone` there (see rdf-values.md).
-  const { format, language, locale } = useSdkLocale();
+  const { format, language } = useSdkLocale();
   const t = useMessages(texts);
-  return (term: SparqlTerm, predicate?: string) =>
+  const describe = (term: SparqlTerm, predicate?: string) =>
     describeValue(term, {
       format,
       language,
-      locale,
       vocabulary,
       predicate,
       addressPredicates: commonAddressPredicates,
       texts: t,
     });
+  const label = (iri: string) => labelFor(iri, vocabulary, language);
+  return { describe, label, t };
 }
 
 /** Compact text for one term, such as a graph node's caption. */
@@ -57,7 +58,7 @@ export function ValueText({
   readonly term: SparqlTerm;
   readonly predicate?: string;
 }) {
-  const shown = useDescribe()(term, predicate);
+  const shown = useValues().describe(term, predicate);
   return (
     <span lang={shown.language} dir="auto">
       {shown.text}
@@ -77,9 +78,7 @@ export function ResourceValues({
   readonly result: SelectResult;
   readonly onShow: (iri: string) => void;
 }) {
-  const describe = useDescribe();
-  const t = useMessages(texts);
-  const { language } = useSdkLocale();
+  const { describe, label, t } = useValues();
   const rows = result.rows.flatMap((row) =>
     row['property']?.type === 'iri' && row['value']
       ? [{ property: row['property'].value, value: row['value'] }]
@@ -92,7 +91,9 @@ export function ResourceValues({
         const shown = describe(value, property);
         return (
           <div key={index}>
-            <dt title={property}>{labelFor(property, vocabulary, language)}</dt>
+            <dt title={property} dir="auto">
+              {label(property)}
+            </dt>
             <dd>
               <span lang={shown.language} dir="auto">
                 {shown.text}

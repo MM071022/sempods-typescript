@@ -40,8 +40,13 @@ export const commonAddressPredicates: ReadonlySet<string> = new Set([
   'http://xmlns.com/foaf/0.1/homepage',
 ]);
 
-/** Controls and Unicode format characters, such as bidi overrides. */
-const INVISIBLE = /[\p{Cc}\p{Cf}]/u;
+/**
+ * Characters that are invisible or reorder text: controls, format characters
+ * such as bidi overrides and tags, surrogates, private use, line separators
+ * and blank fillers.
+ */
+const INVISIBLE =
+  /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u2800]/u;
 
 /**
  * The app's label for `iri`, else a readable name from the IRI itself. A
@@ -57,7 +62,8 @@ export function labelFor(
 }
 
 /**
- * The IRI's last `#`, `/` or `:` segment, decoded unless that would add
+ * The IRI's last `#`, `/` or `:` segment. It is decoded unless the result
+ * would be blank, start with a combining mark or contain whitespace or
  * invisible characters; those already in the IRI are escaped.
  */
 export function readableName(iri: string): string {
@@ -69,7 +75,11 @@ export function readableName(iri: string): string {
   } catch {
     // A malformed escape stays encoded.
   }
-  return visible(INVISIBLE.test(decoded) ? local : decoded);
+  const readable =
+    /[\p{L}\p{N}]/u.test(decoded) &&
+    !/^\p{M}|\s/u.test(decoded) &&
+    !INVISIBLE.test(decoded);
+  return visible(readable ? decoded : local);
 }
 
 export interface WebAddress {
@@ -121,18 +131,24 @@ export function exactTerm(term: SparqlTerm): string {
   }
 }
 
+/** Escapes invisible characters as N-Triples `\\uXXXX` or `\\UXXXXXXXX`. */
 function visible(value: string): string {
-  return value.replace(
-    new RegExp(INVISIBLE.source, 'gu'),
-    (char) => `\\u${char.codePointAt(0)!.toString(16).padStart(4, '0')}`,
-  );
+  return value.replace(new RegExp(INVISIBLE.source, 'gu'), (char) => {
+    const code = char.codePointAt(0)!;
+    return code > 0xffff
+      ? `\\U${code.toString(16).padStart(8, '0')}`
+      : `\\u${code.toString(16).padStart(4, '0')}`;
+  });
 }
 
-/** Years 0001–9999 and no time zone, the form `format.dateOnly` reads. */
-const DAY = /^(?!0000)\d{4}-\d{2}-\d{2}$/;
+/**
+ * Years 1000–9999 without a time zone. `format.dateOnly` also reads earlier
+ * years, but shows 0050 as "50", which reads like 1950.
+ */
+const DAY = /^[1-9]\d{3}-\d{2}-\d{2}$/;
 /** An `xsd:dateTime` with a time zone, so it names one instant. */
 const INSTANT =
-  /^(?!0000)(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
+  /^([1-9]\d{3}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
 
 /**
  * A formatted date, or undefined to show the lexical form. Only `xsd:date`
@@ -149,7 +165,9 @@ export function readableDate(
     const instant = datatype === `${XSD}dateTime` && INSTANT.exec(value);
     if (instant) {
       format.dateOnly(instant[1]!); // Throws for a day such as 2026-02-30.
-      return format.dateTime(value);
+      // Its offset can move an instant out of the range, such as into 0999.
+      const year = new Date(value).getUTCFullYear();
+      if (year >= 1000 && year <= 9999) return format.dateTime(value);
     }
   } catch {
     // An unsupported or invalid lexical form stays exact.
@@ -158,10 +176,9 @@ export function readableDate(
 }
 
 export interface ValueOptions {
-  /** `useSdkLocale()` or `createLocale(…)`: formatters, UI language, locale. */
+  /** From `useSdkLocale()` or `createLocale(…)`: formatters and UI language. */
   readonly format: Formatters;
   readonly language: Language;
-  readonly locale: string;
   readonly vocabulary: Vocabulary;
   /** The predicate the term is the value of, if any. */
   readonly predicate?: string | undefined;
@@ -218,7 +235,7 @@ function describeLiteral(
     return {
       text: term.value,
       language: term.language,
-      note: languageName(term.language, options.locale),
+      note: languageName(term.language, options.language),
       exact,
     };
   const { datatype } = term;
@@ -241,9 +258,10 @@ function describeLiteral(
   };
 }
 
-function languageName(tag: string, locale: string): string {
+/** In the UI language, like the other notes. */
+function languageName(tag: string, language: Language): string {
   try {
-    return new Intl.DisplayNames(locale, { type: 'language' }).of(tag) ?? tag;
+    return new Intl.DisplayNames(language, { type: 'language' }).of(tag) ?? tag;
   } catch {
     return tag;
   }

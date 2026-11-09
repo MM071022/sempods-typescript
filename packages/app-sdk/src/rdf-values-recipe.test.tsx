@@ -18,7 +18,10 @@ import {
   readableName,
   type Vocabulary,
 } from '../../../examples/todo/recipes/rdf-values.js';
-import { ResourceValues } from '../../../examples/todo/recipes/rdf-value-view.js';
+import {
+  ResourceValues,
+  ValueText,
+} from '../../../examples/todo/recipes/rdf-value-view.js';
 
 afterEach(cleanup);
 
@@ -42,11 +45,38 @@ const values = {
   impossible: { type: 'literal', value: '2026-02-30', datatype: `${XSD}date` },
   zonedDay: { type: 'literal', value: '2026-10-05Z', datatype: `${XSD}date` },
   ancient: { type: 'literal', value: '-0044-03-15', datatype: `${XSD}date` },
+  yearZero: { type: 'literal', value: '0000-01-01', datatype: `${XSD}date` },
+  shortYear: { type: 'literal', value: '0050-03-01', datatype: `${XSD}date` },
+  earlyInstant: {
+    type: 'literal',
+    value: '1000-01-01T00:30:00+14:00',
+    datatype: `${XSD}dateTime`,
+  },
+  impossibleInstant: {
+    type: 'literal',
+    value: '2026-02-30T10:00:00Z',
+    datatype: `${XSD}dateTime`,
+  },
+  farOffset: {
+    type: 'literal',
+    value: '2026-10-05T10:00:00+14:30',
+    datatype: `${XSD}dateTime`,
+  },
+  instantText: { type: 'literal', value: '2026-10-05T23:30:00Z' },
   dateText: { type: 'literal', value: '2026-10-05' },
   year: { type: 'literal', value: '2026', datatype: `${XSD}gYear` },
   count: { type: 'literal', value: '007', datatype: `${XSD}integer` },
   link: { type: 'literal', value: 'https://example.org/docs/a?x=1#top' },
   script: { type: 'literal', value: 'javascript:alert(1)' },
+  anyUri: {
+    type: 'literal',
+    value: 'https://example.org/a',
+    datatype: `${XSD}anyURI`,
+  },
+  spaced: { type: 'literal', value: 'https://example.org/a b' },
+  zeroWidth: { type: 'literal', value: 'https://exa\u200Bmple.org/' },
+  override: { type: 'literal', value: 'abc\u202Edef' },
+  tagged: { type: 'literal', value: 'a\u{E0041}b' },
   credentials: { type: 'literal', value: 'https://user:pw@example.org/' },
   quote: { type: 'literal', value: 'say "hi"\\' },
   person: { type: 'uri', value: 'https://example.org/people/al%C3%AFce' },
@@ -102,7 +132,7 @@ function presenter(
   timeZone: string,
   vocabulary: Vocabulary = commonVocabulary,
 ) {
-  const { format, language, locale } = createLocale({
+  const { format, language } = createLocale({
     locale: 'de-DE',
     timeZone,
   });
@@ -110,7 +140,6 @@ function presenter(
     describeValue(term, {
       format,
       language,
-      locale,
       vocabulary,
       predicate,
       addressPredicates: commonAddressPredicates,
@@ -136,6 +165,9 @@ describe('RDF value recipe', () => {
     // Unknown datatype: a readable name from its IRI, no request.
     expect(show(t.year)).toMatchObject({ text: '2026', note: 'gYear' });
     expect(show(t.quote).exact).toBe('"say \\"hi\\"\\\\"');
+    // Invisible characters are escaped in the exact form, also above U+FFFF.
+    expect(show(t.override).exact).toBe('"abc\\u202edef"');
+    expect(show(t.tagged).exact).toBe('"a\\U000e0041b"');
     expect(show(t.node)).toEqual({ text: 'Unbenannter Knoten', exact: '_:b0' });
     // An RDF 1.2 direction changes the term; it is kept, not shown as plain text.
     expect(show(t.directed)).toEqual({
@@ -167,6 +199,12 @@ describe('RDF value recipe', () => {
       'impossible',
       'zonedDay',
       'ancient',
+      'yearZero',
+      'shortYear',
+      'earlyInstant',
+      'impossibleInstant',
+      'farOffset',
+      'instantText',
     ] as const)
       expect(show(t[name]).text).toBe(values[name].value);
     expect(show(t.dateText)).toEqual({
@@ -192,6 +230,18 @@ describe('RDF value recipe', () => {
       exact: '"javascript:alert(1)"',
     });
     expect(show(t.credentials).address).toBeUndefined();
+    expect(show(t.spaced).address).toBeUndefined();
+    expect(show(t.zeroWidth).address).toBeUndefined();
+    expect(show(t.anyUri)).toEqual({
+      text: 'example.org/a',
+      note: 'Adresse',
+      exact: `"https://example.org/a"^^<${XSD}anyURI>`,
+      address: {
+        href: 'https://example.org/a',
+        host: 'example.org',
+        path: '/a',
+      },
+    });
     // An IRI is a web address only as the value of an address predicate.
     expect(show(t.homepage, `${SCHEMA}knows`)).toEqual({
       text: 'example.org',
@@ -220,6 +270,9 @@ describe('RDF value recipe', () => {
       '%E2%80%AEexe',
     );
     expect(readableName('http://example.org/vocab/')).toBe('vocab');
+    // Decoding must not make a name blank or invisible.
+    for (const local of ['%20%20', '%E3%85%A4', '%CC%81', 'a%E2%80%8Bb'])
+      expect(readableName(`https://example.org/${local}`)).toBe(local);
     expect(readableName('urn:isbn:9780000000000')).toBe('9780000000000');
   });
 
@@ -271,6 +324,21 @@ describe('RDF value recipe', () => {
     expect(screen.getByText('startDate')).toBeTruthy();
     expect(screen.queryByText('007')).toBeNull();
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('renders compact text with the literal language', async () => {
+    const t = await terms();
+    render(
+      <SdkLocaleProvider locale="de-DE" timeZone="America/New_York">
+        <ValueText term={t.greeting} />
+        <ValueText term={t.instant} />
+        <ValueText term={t.homepage} predicate={`${SCHEMA}url`} />
+      </SdkLocaleProvider>,
+    );
+    expect(screen.getByText('Grüezi').getAttribute('lang')).toBe('de-CH');
+    expect(screen.getByText('05.10.2026, 19:30')).toBeTruthy();
+    expect(screen.getByText('example.org')).toBeTruthy();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 
   it('says so when no row is bound', async () => {
