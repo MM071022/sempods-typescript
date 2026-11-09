@@ -135,7 +135,9 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     Europe/Berlin, UTC+14 and UTC−11: stored `xsd:date` after Apply and Save,
     nothing written after a cancelled chooser or edit, a zoned `xsd:dateTime`
     kept until a day is applied;
-  - keyboard use of the header menu and the calendar; menu focus styles by
+  - keyboard use of the header menu and the calendar; focus back on the menu
+    button after Pods & sharing, opened from the menu, closes by Escape or by
+    Close once the menu has gone; menu focus styles by
     input modality in light, dark and forced colors (a hovered row filled
     without a ring and neutral over the separator, no ring on the button
     after a pointer dismissal, one solid outline inside the row and around
