@@ -137,7 +137,10 @@ Tests are typechecked too. `skipLibCheck` is false throughout.
     kept until a day is applied;
   - keyboard use of the header menu and the calendar; focus back on the menu
     button after Pods & sharing, opened from the menu, closes by Escape or by
-    Close once the menu has gone; menu focus styles by
+    Close once the menu has gone; a decorative leading icon in the menu that
+    leaves the label as the item's name and typeahead, with all labels in
+    one column, also right to left in an Arabic browser locale, and 44px
+    rows; menu focus styles by
     input modality in light, dark and forced colors (a hovered row filled
     without a ring and neutral over the separator, no ring on the button
     after a pointer dismissal, one solid outline inside the row and around

@@ -1,4 +1,4 @@
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { EllipsisIcon, MenuIcon } from 'lucide-react';
 import { Button } from '../components/button.js';
 import {
@@ -21,10 +21,29 @@ export interface HeaderMenuChoice {
   readonly onSelect: () => void;
 }
 
+/** An action: its label names it and leads typeahead. */
+export interface HeaderMenuAction {
+  readonly label: string;
+  readonly onSelect: () => void;
+  /**
+   * A decorative leading icon, such as a lucide icon without a size of its
+   * own: it is shown in a 16px box and hidden from assistive technology, so
+   * `label` stays the whole accessible name. When an action has one, the other
+   * rows of the menu keep an empty box, so all labels start in one column, in
+   * either reading direction.
+   */
+  readonly icon?: ReactNode;
+}
+
 /** An action, a submenu of checked choices, or `null` for a separator. */
 export type HeaderMenuEntry =
-  | { readonly label: string; readonly onSelect: () => void }
-  | { readonly label: string; readonly choices: readonly HeaderMenuChoice[] }
+  | HeaderMenuAction
+  | {
+      readonly label: string;
+      readonly choices: readonly HeaderMenuChoice[];
+      /** Submenus take no icon; they line up with the actions' labels. */
+      readonly icon?: never;
+    }
   | null;
 
 export interface HeaderMenuProps {
@@ -44,8 +63,9 @@ export interface HeaderMenuProps {
 /**
  * A round icon button with a menu: Enter or a press opens it, arrow keys move,
  * ArrowRight opens a submenu and ArrowLeft returns, Escape closes one level and
- * focus returns to the button. Items are 44px high. `ref` reaches the button,
- * for example as `AppAccess`'s `focusTarget`.
+ * focus returns to the button. Items are 44px high. An action can lead with a
+ * decorative `icon`. `ref` reaches the button, for example as `AppAccess`'s
+ * `focusTarget`.
  */
 export function HeaderMenu({
   label,
@@ -54,6 +74,20 @@ export function HeaderMenu({
   ref,
 }: HeaderMenuProps) {
   const t = useAdapterTexts();
+  // With an icon on any action, every row gets the icon's box, filled or
+  // empty, so the labels share one column in both reading directions.
+  const icons = items.some(
+    (item) => item !== null && !('choices' in item) && Boolean(item.icon),
+  );
+  const lead = (icon?: ReactNode) =>
+    icons ? (
+      <span
+        aria-hidden="true"
+        className="flex size-4 shrink-0 items-center justify-center overflow-hidden"
+      >
+        {icon}
+      </span>
+    ) : null;
   return (
     <DropdownMenuTrigger>
       <Button
@@ -71,7 +105,11 @@ export function HeaderMenu({
             <DropdownMenuSeparator key={i} />
           ) : 'choices' in item ? (
             <DropdownMenuSub key={i}>
-              <DropdownMenuSubTrigger className="min-h-11">
+              <DropdownMenuSubTrigger
+                className="min-h-11"
+                textValue={item.label}
+              >
+                {lead()}
                 {item.label}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent
@@ -96,8 +134,10 @@ export function HeaderMenu({
             <DropdownMenuItem
               key={i}
               className="min-h-11"
+              textValue={item.label}
               onAction={item.onSelect}
             >
+              {lead(item.icon)}
               {item.label}
             </DropdownMenuItem>
           ),

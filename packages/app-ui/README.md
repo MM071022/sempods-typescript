@@ -549,7 +549,13 @@ with an icon: `<ActionButton shape="round-lg" label="Complete" onPress={complete
 - **`HeaderMenu`**: a round 44px icon button (`icon="menu"` or `"more"`) with a
   menu of actions, separators (`null`) and submenus of checked choices
   (`{ label, choices: [{ label, checked, onSelect }] }`; give choices an `id`
-  when their labels can repeat). Arrow keys move,
+  when their labels can repeat). An action's own `icon` is a decorative
+  leading icon (`{ label, onSelect, icon: <UsersIcon /> }`, shown at 16px,
+  so give it no size of its own): it is hidden from assistive technology, so
+  the label stays the item's name and leads typeahead. Once one action has an
+  icon, every other row keeps an empty icon space, so the labels start in one
+  column in either reading direction; submenus take no icon. Rows stay 44px
+  high. Arrow keys move,
   ArrowRight opens a submenu, ArrowLeft and Escape close one level, focus
   returns to the button. `ref` reaches the button: pass it as `focusTarget`
   to a surface an item opens, such as `AppAccess`, so focus returns there
@@ -665,6 +671,7 @@ closes, so Escape or Close would otherwise leave the focus on the page:
 ```tsx
 // app-menu.tsx
 import { useRef, useState } from 'react';
+import { UsersIcon } from 'lucide-react';
 import { AppAccess, useSdkLocale } from '@sempods/app-sdk/react';
 import { HeaderMenu } from '@sempods/app-ui';
 
@@ -681,6 +688,7 @@ export function AppMenu() {
           {
             label: messages.controls.dataAccess,
             onSelect: () => setManaging(true),
+            icon: <UsersIcon />,
           },
         ]}
       />
