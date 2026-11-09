@@ -43,6 +43,21 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
     dateStyle: 'medium',
     timeZone: 'UTC',
   });
+
+  function formatWithPaddedYear(
+    formatter: Intl.DateTimeFormat,
+    date: Date,
+  ): string {
+    const year = date.getUTCFullYear();
+    if (year < 1) throw new RangeError('Year must be 0001 or later.');
+    if (year >= 1000) return formatter.format(date);
+    const parts = formatter.formatToParts(date);
+    const paddedYear = String(year).padStart(4, '0');
+    return parts
+      .map((part) => (part.type === 'year' ? paddedYear : part.value))
+      .join('');
+  }
+
   return {
     number: (value: number) => numbers.format(value),
     list: (values: readonly string[]) => lists.format(values),
@@ -52,7 +67,12 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
         other: string;
       },
     ) => forms[plurals.select(count)] ?? forms.other,
-    dateTime: (value: string | Date) => instants.format(new Date(value)),
+    dateTime: (value: string | Date) => {
+      const date = new Date(value);
+      if (!Number.isFinite(date.valueOf()))
+        throw new RangeError('Invalid date.');
+      return formatWithPaddedYear(instants, date);
+    },
     dateOnly(value: string) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
         throw new RangeError('Expected an ISO calendar date.');
@@ -62,7 +82,7 @@ export function createFormatters(locale: string, timeZone = 'UTC') {
         date.toISOString().slice(0, 10) !== value
       )
         throw new RangeError('Invalid calendar date.');
-      return dates.format(date);
+      return formatWithPaddedYear(dates, date);
     },
   };
 }

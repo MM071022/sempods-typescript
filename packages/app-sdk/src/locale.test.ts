@@ -46,6 +46,20 @@ it('formats regions and time zones explicitly without moving calendar dates', ()
   expect(de.list(['Lesen', 'Schreiben'])).toBe('Lesen und Schreiben');
 });
 
+it('pads years below 1000 to four digits and rejects years before 0001 (#258)', () => {
+  const en = createFormatters('en-US');
+  const de = createFormatters('de-DE');
+  expect(en.dateOnly('0050-03-01')).toContain('0050');
+  expect(de.dateOnly('0050-03-01')).toContain('0050');
+  expect(en.dateOnly('0099-12-31')).toContain('0099');
+  expect(de.dateOnly('0099-12-31')).toContain('0099');
+  expect(en.dateTime('0050-03-01T12:00:00Z')).toContain('0050');
+  expect(de.dateTime('0050-03-01T12:00:00Z')).toContain('0050');
+  expect(en.dateOnly('1000-01-01')).toContain('1000');
+  expect(() => en.dateOnly('0000-01-01')).toThrow(RangeError);
+  expect(() => de.dateTime('0000-06-15T00:00:00Z')).toThrow(RangeError);
+});
+
 it('keeps translation, formatting and time zone independent and hides diagnostics', () => {
   const locale = createLocale({
     language: 'de',
