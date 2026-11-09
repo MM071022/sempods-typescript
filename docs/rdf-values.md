@@ -66,8 +66,8 @@ function Details({
 ```
 
 Embed only an IRI from a decoded term in `<…>`. The SDK rejects a decoded IRI
-containing whitespace, controls or a character SPARQL forbids there (`<>"{}|^`,
-backtick, backslash). Never embed text a person typed.
+containing whitespace, C0 controls or a character SPARQL forbids there
+(`<>"{}|^`, backtick, backslash). Never embed text a person typed.
 
 `ResourceValues` skips rows whose `?property` is unbound or not an IRI. With no
 rows left, it says so instead of showing an empty list. `LIMIT 200` bounds the
@@ -120,7 +120,7 @@ them from `createLocale({ locale, timeZone }).format`.
 - An `xsd:dateTime` with a time zone names one instant. It shows in the
   provider's `timeZone`: `2026-10-05T23:30:00Z` becomes `06.10.2026, 01:30` in
   Berlin and `05.10.2026, 19:30` in New York. The instant must also fall in the
-  years 1000 to 9999.
+  years 1000 to 9999 in UTC.
 - Everything else shows as stored: impossible days (`2026-02-30`), dates with a
   time zone (`2026-10-05Z`), years before 1000 (`0050-03-01`, `-0044-03-15`) and
   date-times without a time zone. `format.dateOnly` would show `0050-03-01` as

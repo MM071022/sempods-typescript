@@ -63,6 +63,11 @@ const values = {
     datatype: `${XSD}dateTime`,
   },
   instantText: { type: 'literal', value: '2026-10-05T23:30:00Z' },
+  numberUrl: {
+    type: 'literal',
+    value: 'https://example.org/',
+    datatype: `${XSD}integer`,
+  },
   dateText: { type: 'literal', value: '2026-10-05' },
   year: { type: 'literal', value: '2026', datatype: `${XSD}gYear` },
   count: { type: 'literal', value: '007', datatype: `${XSD}integer` },
@@ -231,6 +236,12 @@ describe('RDF value recipe', () => {
     });
     expect(show(t.credentials).address).toBeUndefined();
     expect(show(t.spaced).address).toBeUndefined();
+    // Only text and xsd:anyURI literals are addresses.
+    expect(show(t.numberUrl)).toEqual({
+      text: 'https://example.org/',
+      note: 'Ganzzahl',
+      exact: `"https://example.org/"^^<${XSD}integer>`,
+    });
     expect(show(t.zeroWidth).address).toBeUndefined();
     expect(show(t.anyUri)).toEqual({
       text: 'example.org/a',
@@ -271,7 +282,15 @@ describe('RDF value recipe', () => {
     );
     expect(readableName('http://example.org/vocab/')).toBe('vocab');
     // Decoding must not make a name blank or invisible.
-    for (const local of ['%20%20', '%E3%85%A4', '%CC%81', 'a%E2%80%8Bb'])
+    for (const local of [
+      '%20%20',
+      'a%20b',
+      '%E3%85%A4',
+      '%CC%81',
+      '%CC%81x',
+      '%E2%80%94',
+      'a%E2%80%8Bb',
+    ])
       expect(readableName(`https://example.org/${local}`)).toBe(local);
     expect(readableName('urn:isbn:9780000000000')).toBe('9780000000000');
   });
