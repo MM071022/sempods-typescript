@@ -6,7 +6,7 @@
  * message once.
  */
 import { webcrypto } from 'node:crypto';
-import { useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import {
   act,
   cleanup,
@@ -454,6 +454,57 @@ it('hides an info prompt after about 6 seconds by dismissing it, pauses while ho
   // A remount does not replay it.
   view.rerender(ui(2));
   expect(prompts()).toEqual([]);
+});
+
+it.each(['ok', 'escape'] as const)(
+  'returns focus to focusTarget when a focused prompt is dismissed (%s)',
+  async (how) => {
+    const { runtime } = await sharingUnchanged();
+    function App() {
+      const back = useRef<HTMLButtonElement>(null);
+      return (
+        <SempodsProvider runtime={runtime}>
+          <button ref={back}>Back</button>
+          <AppAccess appName="Tasks" focusTarget={back} />
+        </SempodsProvider>
+      );
+    }
+    render(<App />);
+    await waitFor(() =>
+      expect(prompts().map((p) => p.dataset.reason)).toEqual([
+        'sharing-unchanged',
+      ]),
+    );
+    const ok = within(prompts()[0]!).getByRole('button', { name: 'OK' });
+    act(() => ok.focus());
+    if (how === 'ok') await act(async () => ok.click());
+    else fireEvent.keyDown(ok, { key: 'Escape' });
+    await waitFor(() => expect(prompts()).toEqual([]));
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Back' }),
+    );
+  },
+);
+
+it('moves no focus when an unfocused prompt goes', async () => {
+  const { runtime } = await sharingUnchanged();
+  function App() {
+    const back = useRef<HTMLButtonElement>(null);
+    return (
+      <SempodsProvider runtime={runtime}>
+        <button ref={back}>Back</button>
+        <input aria-label="Draft" />
+        <AppAccess appName="Tasks" focusTarget={back} />
+      </SempodsProvider>
+    );
+  }
+  render(<App />);
+  await waitFor(() => expect(prompts()).toHaveLength(1));
+  const draft = screen.getByRole('textbox', { name: 'Draft' });
+  act(() => draft.focus());
+  fireEvent.keyDown(prompts()[0]!, { key: 'Escape' });
+  await waitFor(() => expect(prompts()).toEqual([]));
+  expect(document.activeElement).toBe(draft);
 });
 
 it('shows no prompt and no gate while startup settles and a saved session restores', async () => {

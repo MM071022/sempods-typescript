@@ -1,10 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import type {
   AccessPrompt as AccessPromptFact,
@@ -190,9 +192,11 @@ const infoTimeout = 6000;
 
 function TimedPrompt({
   prompt,
+  focusTarget,
   children,
 }: {
   readonly prompt: AccessPromptFact;
+  readonly focusTarget: RefObject<HTMLElement | null> | undefined;
   readonly children: ReactNode;
 }) {
   const app = useController();
@@ -206,6 +210,20 @@ function TimedPrompt({
     return () => clearTimeout(timer);
   }, [timed, app, id]);
   const element = useRef<HTMLLIElement>(null);
+  // Where focus came from, to return there when this prompt goes while it
+  // holds focus (dismissed, resolved). Focus elsewhere is never moved.
+  const previous = useRef<HTMLElement | null>(null);
+  const target = useRef(focusTarget);
+  target.current = focusTarget;
+  useLayoutEffect(() => {
+    const item = element.current;
+    return () => {
+      // Still attached here: the deletion removes the element afterwards.
+      if (!item?.contains(item.ownerDocument.activeElement)) return;
+      const next = target.current?.current ?? previous.current;
+      if (next?.isConnected) next.focus();
+    };
+  }, []);
   const blur = useCallback(
     (next: EventTarget | null) =>
       !(next instanceof Node && element.current?.contains(next)),
@@ -216,7 +234,14 @@ function TimedPrompt({
       ref={element}
       onPointerEnter={() => setHeld((h) => ({ ...h, hover: true }))}
       onPointerLeave={() => setHeld((h) => ({ ...h, hover: false }))}
-      onFocus={() => setHeld((h) => ({ ...h, focus: true }))}
+      onFocus={(event) => {
+        if (
+          event.relatedTarget instanceof HTMLElement &&
+          !event.currentTarget.contains(event.relatedTarget)
+        )
+          previous.current = event.relatedTarget;
+        setHeld((h) => ({ ...h, focus: true }));
+      }}
       onBlur={(event) => {
         if (blur(event.relatedTarget)) setHeld((h) => ({ ...h, focus: false }));
       }}
@@ -230,10 +255,16 @@ function TimedPrompt({
  * A default stack of all action and info prompts at the bottom of the
  * viewport, for apps without their own toast host; a polite live region.
  * Info prompts hide after about 6 seconds unless focused or hovered, which
- * dismisses them; action prompts stay until dismissed or resolved. Shows
- * nothing while a blocking prompt holds the gate.
+ * dismisses them; action prompts stay until dismissed or resolved. A prompt
+ * that goes while it holds focus returns focus to `focusTarget`, otherwise to
+ * where focus came from. Shows nothing while a blocking prompt holds the gate.
  */
-export function AccessPrompts() {
+export function AccessPrompts({
+  focusTarget,
+}: {
+  /** Focus after a focused prompt goes, as `focusTarget` of `AppAccess`. */
+  readonly focusTarget?: RefObject<HTMLElement | null>;
+} = {}) {
   const { blocking, prompts } = useAccessPrompts();
   const { direction } = useSdkLocale();
   // One stack per provider, also with several AppAccess instances.
@@ -252,7 +283,11 @@ export function AccessPrompts() {
       </style>
       <ul>
         {shown.map((prompt) => (
-          <TimedPrompt key={prompt.id} prompt={prompt}>
+          <TimedPrompt
+            key={prompt.id}
+            prompt={prompt}
+            focusTarget={focusTarget}
+          >
             <AccessPrompt prompt={prompt} />
           </TimedPrompt>
         ))}
