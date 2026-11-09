@@ -339,6 +339,24 @@ describe('callbacks', () => {
       ['sign-in-failed', 'a'],
     ]);
   });
+  it('adds no callback prompt while its connection signs out', () => {
+    const state = derive(
+      facts({
+        callbackNotice: true,
+        startup: {
+          ...started,
+          interaction: 'failed',
+          attemptConnectionId: 'a',
+        },
+        connections: [
+          connection('a', { kind: 'ended', problem: 'disconnected' }),
+          connection('b'),
+        ],
+        activeId: 'b',
+      }),
+    );
+    expect(state.prompts).toEqual([]);
+  });
   it('offers only dismiss for a callback without a known attempt', () => {
     const state = derive(
       facts({

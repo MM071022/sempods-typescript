@@ -216,11 +216,17 @@ export function createAccessTracker() {
         const owner = causes.findIndex(
           (c) => attempt !== null && c.connectionId === attempt,
         );
+        const session = f.connections.find((c) => c.id === attempt)?.session;
+        // Signing out or forgetting that connection answers the callback.
+        const leaving =
+          session?.kind === 'ended' && session.problem === 'disconnected';
         if (owner >= 0) {
           // The connection's prompt explains it; it takes over the failure.
           const existing = causes[owner]!;
           if (!existing.failure && startup.failure)
             causes[owner] = { ...existing, failure: startup.failure };
+        } else if (leaving) {
+          // Nothing to add while that connection signs out.
         } else if (startup.interaction === 'failed')
           causes.push({
             key: 'callback\nsign-in-failed',
