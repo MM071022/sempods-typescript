@@ -958,6 +958,8 @@ function AppContent() {
   otherwise **Available to this app** lists them. Then **Change sharing**,
   **Sign out** with its this-device note (`controls.disconnectHint`; empty
   hides it), and last a collapsed **Connect another Pod** (`mode="multiple"`).
+  After a sign-out that could not be saved, **Try again** repeats it in place
+  of a sign-in.
 - These are the catalogue's rights for this session, not whether a Context is
   shared or public; changing them is the Pod's consent behind **Change
   sharing**. It sends one catalogue request and no extra label reads.
@@ -1024,7 +1026,9 @@ function Access({ open, onClose }: { open: boolean; onClose: () => void }) {
   also after a leave confirmation.
 - `<AccessPrompts />` is the default stack: a polite live region at the bottom
   of the viewport. Info prompts hide after about 6 seconds unless focused or
-  hovered, and hiding dismisses them, so they do not return.
+  hovered, and hiding dismisses them, so they do not return. A prompt that goes
+  while it holds focus returns focus to its `focusTarget` prop (`AppAccess`
+  passes its own), otherwise to where focus came from.
 - Own buttons call the guarded actions directly: `sign-in` is
   `authorize(connectionId)`, or without a connection `connect()` for a preset or
   sole allowed Pod and otherwise `connect(url)` from an address field; `retry`

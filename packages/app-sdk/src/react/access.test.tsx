@@ -156,6 +156,64 @@ it.each([
   },
 );
 
+it('offers the sign-out retry, not a sign-in, in open modal management after a failed sign-out', async () => {
+  const f = fixture();
+  const { runtime } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  const management = () =>
+    document.querySelector<HTMLElement>('[data-sempods-ui="management"]')!;
+  const signOut = await within(management()).findByRole('button', {
+    name: 'Sign out',
+  });
+  await waitFor(() =>
+    expect((signOut as HTMLButtonElement).disabled).toBe(false),
+  );
+  const write = vi
+    .spyOn(IDBObjectStore.prototype, 'put')
+    .mockImplementation(() => {
+      throw new Error('private fixture storage detail');
+    });
+  await act(async () => signOut.click());
+  await waitFor(() =>
+    expect(
+      document
+        .querySelector('[data-sempods-ui="gate"]')
+        ?.getAttribute('data-reason'),
+    ).toBe('sign-out-failed'),
+  );
+  // Management above the gate repeats the sign-out; it never signs in to
+  // this connection again. Another Pod stays reachable, collapsed.
+  const buttons = () =>
+    within(management())
+      .getAllByRole('button')
+      .filter((b) => !b.closest('.sp-access-another'))
+      .map((b) => b.textContent);
+  await waitFor(() => expect(buttons()).toContain('Try again'));
+  expect(buttons()).not.toContain('Sign in');
+  expect(buttons()).not.toContain('Sign out');
+  expect(management().querySelector('.sp-access-primary')?.textContent).toBe(
+    'Try again',
+  );
+  expect(within(management()).getByRole('alert').textContent).toBe(
+    'Sign-out was not saved on this device. Try signing out again.',
+  );
+  write.mockRestore();
+  await act(async () =>
+    within(management()).getByRole('button', { name: 'Try again' }).click(),
+  );
+  await waitFor(() =>
+    expect(runtime.getSnapshot()[0]?.session).toEqual({
+      kind: 'signed-out',
+      problem: 'disconnected',
+    }),
+  );
+});
+
 it.each(['en', 'de'] as const)(
   'one permitted Pod needs only explicit sign-in, supports an optional icon and retries (%s)',
   async (language) => {

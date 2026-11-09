@@ -164,7 +164,9 @@ export function AppAccess({
       <Gate {...props} />
       {/* Management in place already shows the connection view. */}
       {!(open && !asDialog) && <AccessSection {...props} manage={false} />}
-      <AccessPrompts />
+      <AccessPrompts
+        {...(props.focusTarget ? { focusTarget: props.focusTarget } : {})}
+      />
       {management}
     </>
   );
@@ -896,7 +898,8 @@ function AccessConnections({
               )}
             </>
           )}
-          {(manage || c.session.kind === 'ended') && (
+          {/* After a failed sign-out, Try again below repeats it. */}
+          {(manage || c.session.kind === 'ended') && !disconnectFailed && (
             <button
               disabled={unavailable}
               aria-describedby={disconnectHint ? disconnectId : undefined}
@@ -1036,7 +1039,17 @@ function AccessConnections({
             !shownByNotice && (
               <p role="status">{endedMessage(c.session, m, true)}</p>
             )}
-          {c.session.kind === 'ended' && c.session.restorable ? (
+          {disconnectFailed ? (
+            // The sign-out was not saved: repeat it, never sign in again.
+            <button
+              className="sp-access-primary"
+              disabled={unavailable}
+              aria-describedby={disconnectHint ? disconnectId : undefined}
+              onClick={() => void act(() => app.disconnect(c.id))}
+            >
+              {m.controls.retry}
+            </button>
+          ) : c.session.kind === 'ended' && c.session.restorable ? (
             // The Pod was unreachable, not the session lost: no new sign-in.
             <button
               className="sp-access-primary"
