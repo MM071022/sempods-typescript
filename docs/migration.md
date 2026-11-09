@@ -84,6 +84,27 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
   stays open. Apps that must keep drafts across a sign-in store them
   themselves.
 
+### UI kit
+
+- **The compact `Dialog` speaks the SDK's language.** Its corner close button
+  and `DialogFooter`'s `showCloseButton` were always named "Close"; they now
+  take the SDK's text in the provider's language (German: "Schließen"), and
+  `closeLabel` sets another. Without a provider they stay "Close". End-to-end
+  tests of a German app that find these buttons by "Close" look for
+  "Schließen".
+- **A press in an SDK confirmation no longer closes a compact `Dialog`.** As
+  in `ScreenDialog`, cancelling a question above it keeps the dialog and the
+  draft. An app's own `shouldCloseOnInteractOutside` still applies; a filter
+  that only ignored `dialog:modal` can go.
+
+- **`ScreenDialog` keeps clear of device insets on phones.** Full screen
+  (below 640px), its heading and scrolling content add
+  `env(safe-area-inset-*)` to their padding, so in an app with
+  `viewport-fit=cover` Close and the last action no longer sit under a notch
+  or the home indicator. Without insets, and in the centred dialog, the layout
+  is unchanged. Remove app CSS that added these insets around or inside a
+  `ScreenDialog`, or they count twice.
+
 ### Type additions
 
 - `SessionFact`'s `signed-out` variant gains the optional `problem`, and its
@@ -109,6 +130,17 @@ It is now `AccessGate` + `ContextAccess` + `AccessPrompts` + management:
   `AccessState` (types, `@sempods/app-sdk`); `AccessGate`, `ContextAccess`,
   `AccessPrompt`, `AccessPrompts`, `useAccessPrompts` and the types
   `AccessGateProps` and `ContextAccessProps` (`@sempods/app-sdk/react`).
+- app-ui's `Dialog` and `DialogFooter` gain the optional `closeLabel`.
+- `@sempods/app-ui`: `HeaderMenuProps` gains the optional `ref` to the menu's
+  button. An app whose menu item opens `AppAccess` (Pods & sharing) passes
+  that ref as `focusTarget`, so closing management returns the focus to the
+  button; without it, the focus still falls to the page, as in 0.7
+  ([UI kit guide](../packages/app-ui/README.md#adapters)).
+- `@sempods/app-ui`: a `HeaderMenu` action (the new exported type
+  `HeaderMenuAction`) gains the optional decorative `icon`. The label stays its
+  accessible name and leads typeahead; text-only menus render as before. Apps
+  that composed `DropdownMenu` directly only to place an icon can return to
+  `HeaderMenu`.
 
 ## From 0.6.0 to 0.7.0
 
