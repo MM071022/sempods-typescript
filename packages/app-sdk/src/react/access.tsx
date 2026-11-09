@@ -424,6 +424,23 @@ function GateDialog({
   const label = useId();
   const { messages: m, direction } = useSdkLocale();
   useModalDialog(dialog, true, focusTarget);
+  useLayoutEffect(() => {
+    // A gate that opens after management or a leave confirmation must not
+    // cover them: the top layer stacks by opening order, so raise them again.
+    const above =
+      dialog.current?.ownerDocument.querySelectorAll<HTMLDialogElement>(
+        'dialog[data-sempods-ui="management"][open], dialog[data-sempods-ui="leave"][open]',
+      );
+    for (const element of above ?? []) {
+      if (typeof element.showModal !== 'function') continue;
+      const focused = element.contains(element.ownerDocument.activeElement)
+        ? (element.ownerDocument.activeElement as HTMLElement)
+        : null;
+      element.close();
+      element.showModal();
+      focused?.focus();
+    }
+  }, []);
   const text = usePromptText(blocking);
   const signIn = signInReasons.has(blocking.reason);
   const startup =

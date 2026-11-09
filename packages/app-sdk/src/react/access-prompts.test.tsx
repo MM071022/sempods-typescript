@@ -517,3 +517,44 @@ it('shows one gate and one prompt stack for several AppAccess instances', async 
   await findGate('no-connection');
   expect(document.querySelectorAll('[data-sempods-ui="gate"]')).toHaveLength(1);
 });
+
+it('keeps open management above a gate that opens after it', async () => {
+  // jsdom has no top layer: record the modal order of showModal and close.
+  const layer: HTMLDialogElement[] = [];
+  const proto = HTMLDialogElement.prototype as Partial<HTMLDialogElement>;
+  Object.defineProperty(proto, 'showModal', {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+      layer.push(this);
+    },
+  });
+  Object.defineProperty(proto, 'close', {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.removeAttribute('open');
+      if (layer.includes(this)) layer.splice(layer.indexOf(this), 1);
+    },
+  });
+  cleanups.push(() => {
+    delete proto.showModal;
+    delete proto.close;
+  });
+  const f = fixture();
+  const { runtime, id } = await f.login();
+  cleanups.push(() => runtime.dispose());
+  render(
+    <SempodsProvider runtime={runtime}>
+      <AppAccess appName="Tasks" open onClose={() => {}} />
+    </SempodsProvider>,
+  );
+  await waitFor(() =>
+    expect(layer.map((d) => d.dataset.sempodsUi)).toEqual(['management']),
+  );
+  // The only session ends while management is open: the gate opens below it.
+  await act(async () => {
+    await renewal(f, runtime, id, 'refused');
+  });
+  await findGate('signed-out');
+  expect(layer.map((d) => d.dataset.sempodsUi)).toEqual(['gate', 'management']);
+});
