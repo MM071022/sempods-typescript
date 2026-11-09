@@ -161,6 +161,7 @@ The one API map of these guides. Entries: **app** = `@sempods/app-sdk`,
 | [One-click overview rows](#one-click-overview-rows)                  | `useContextUpdate` (React)                                    | The same definition as `usePodList`                                          |
 | [Edit a Pod-overview row](#editing-an-overview-row)                  | `useContextEditor`, `ResourceEditor` (React)                  | The row's subject and `GRAPH` Context                                        |
 | [Read arbitrary resources](#read-arbitrary-resources)                | `useLoad` (React)                                             | A `ViewRead`; `key` for its inputs                                           |
+| [Read each connection's Pod](#reads-per-connection)                  | `usePodLoad(pod, read)` + `LoadNotice` (React)                | A `runtime.bindPod(id)` handle per connection; one component each            |
 | [Custom connection controls](#custom-layouts-without-appaccess)      | `useApp`, `useAppState`, `useConnections` (React)             | Guarded actions only                                                         |
 
 ### Field definitions
@@ -649,6 +650,8 @@ flow:
 
 `Overview` calls `usePodLoad((pod, signal) => pod.sparql.select(query, { signal }))`
 or `construct`; `useAppState().pod` is the same active `BoundPod`.
+To read through several connections at once, pass each one's handle instead:
+[reads per connection](#reads-per-connection).
 
 - `usePodLoad` infers the handle and data type and behaves like
   [`useLoad`](#load-states); pass the signal to every read and `key` (or call
@@ -855,6 +858,66 @@ function Resource({ iri }: { readonly iri: string }) {
 - `not-found` means absent or hidden in this Context; the two look the same.
 - Bodies: [JSON-LD reads](../packages/client-sdk/README.md#json-ld-read-bodies)
   and [Pod SELECT terms](../packages/client-sdk/README.md#reading-across-the-pod).
+
+### Reads per connection
+
+To show one resource as each connection's Pod sees it, pass that connection's
+`BoundPod` from `runtime.bindPod(id)` as the first argument of `usePodLoad`. It
+reads with the same loader as the active-Pod form, but only through that handle:
+
+```tsx
+// Fragment: `runtime` is the app's one BrowserRuntime; Connection from
+// @sempods/app-sdk. describe(iri) is your CONSTRUCT for a validated IRI.
+/** A handle only while the session is signed in: bindPod never throws then. */
+function readerOf(connection: Connection) {
+  const { kind } = connection.session;
+  return kind === 'active' || kind === 'renewing'
+    ? runtime.bindPod(connection.id)
+    : null;
+}
+
+function Sources({ iri }: { readonly iri: string }) {
+  return useConnections().map((connection) => (
+    <Source key={connection.id} connection={connection} iri={iri} />
+  ));
+}
+
+function Source(props: {
+  readonly connection: Connection;
+  readonly iri: string;
+}) {
+  const { connection, iri } = props;
+  const load = usePodLoad(
+    readerOf(connection),
+    (pod, signal) => pod.sparql.construct(describe(iri), { signal }),
+    { key: iri },
+  );
+  return (
+    <section aria-label={connection.podUrl}>
+      {load.data && <pre>{JSON.stringify(load.data)}</pre>}
+      <LoadNotice {...load} />
+    </section>
+  );
+}
+```
+
+- Binding in render is cheap: `bindPod` returns the same handle while the
+  connection's session lasts; a new sign-in gives a new handle and a fresh
+  read. Bind only while `session.kind` is `active` or `renewing`; otherwise
+  `bindPod` throws `RuntimeError('disconnected')`.
+- Each source has its own state, `LoadNotice` and retry: a `403`, a failure or
+  `cancel()` of one never touches another. Nothing combines Pods or falls back
+  to another connection, and credentials stay with the runtime.
+- `key` names the read's inputs, as with `useLoad`: a new IRI aborts the
+  superseded query and never shows the old one's data. A new handle does the
+  same.
+- Sign-out, a session that ends or lost read access withdraws that source's
+  data (`unavailable`), also from a handle the app kept; changed grants
+  refresh ready data. `null` is `loading` until startup settles, then
+  `unavailable`.
+- Which connections to read is the app's choice: filter `useConnections()`, for
+  example to the Pods the person enabled. Each source reads as soon as it
+  mounts.
 
 ## Part 4: Customizing
 
