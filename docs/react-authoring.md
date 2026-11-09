@@ -879,7 +879,7 @@ function Resource({ iri }: { readonly iri: string }) {
 | `mode`                   | `'single'` \| `'multiple'`        | `'single'` hides adding another Pod once one is selected; presentation only, enforce with runtime `allowedPods`                     |
 | `headingLevel`           | `1` \| `2`                        | Default: `h1` for first sign-in, `h2` for recovery and management. Use `2` under a host title                                       |
 | `components.Connections` | `ComponentType<ConnectionsProps>` | Replaces the connection view; see [replacing it](#replacing-the-connection-view)                                                    |
-| `className`, `style`     | `string`, `CSSProperties`         | Root styling, for example `--sempods-*` tokens                                                                                      |
+| `className`, `style`     | `string`, `CSSProperties`         | Styling of the gate and the Context surface, for example `--sempods-*` tokens, which also cover the gate's whole layer              |
 
 ### What AppAccess shows
 

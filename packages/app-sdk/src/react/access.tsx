@@ -105,6 +105,8 @@ export type AccessGateProps = Pick<
   | 'podNames'
   | 'podAddress'
   | 'focusTarget'
+  | 'className'
+  | 'style'
 >;
 /** What `ContextAccess` receives: the Context surface's options of `AppAccess`. */
 export type ContextAccessProps = Partial<
@@ -374,6 +376,14 @@ function AccessSection({
 }
 
 const selectBlocking = (s: AppSnapshot) => s.access.blocking;
+/** The custom properties of a style, such as `--sempods-*` tokens. */
+function tokensOf(style: CSSProperties | undefined) {
+  if (!style) return undefined;
+  const tokens = Object.fromEntries(
+    Object.entries(style).filter(([name]) => name.startsWith('--')),
+  );
+  return Object.keys(tokens).length ? (tokens as CSSProperties) : undefined;
+}
 /** The gate's reasons that sign in: they show the connection view. */
 const signInReasons = new Set<AccessPromptFact['reason']>([
   'no-connection',
@@ -389,6 +399,8 @@ const signInReasons = new Set<AccessPromptFact['reason']>([
  * `signed-out` and `missing-scopes` it shows the sign-in view: remembered
  * Pods, the other connections and, without a connection, the address input
  * (keeping `allowedPods`). Every other reason shows its own actions only.
+ * `className` and `style` apply to its access surface as in `AppAccess`;
+ * custom properties such as `--sempods-*` tokens also cover the whole layer.
  */
 export function AccessGate(props: AccessGateProps) {
   return <Gate {...props} />;
@@ -415,6 +427,8 @@ function GateDialog({
   podAddress = 'visible',
   focusTarget,
   components,
+  className,
+  style,
   blocking,
 }: Omit<AppAccessProps, 'open' | 'onClose' | 'only' | 'appName'> & {
   readonly appName?: string;
@@ -456,6 +470,8 @@ function GateDialog({
       data-reason={blocking.reason}
       className="sp-access-gate"
       dir={direction}
+      // Custom properties (--sempods-* tokens) also cover the whole layer.
+      style={tokensOf(style)}
       // The gate ends only with its cause.
       onCancel={(event) => event.preventDefault()}
     >
@@ -467,6 +483,8 @@ function GateDialog({
         data-sempods-access=""
         data-sempods-ui="access"
         aria-label={m.controls.dataAccess}
+        className={className}
+        style={style}
       >
         <div className="sp-access-content">
           <header>

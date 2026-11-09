@@ -6,7 +6,7 @@
  * message once.
  */
 import { webcrypto } from 'node:crypto';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import {
   act,
   cleanup,
@@ -557,4 +557,31 @@ it('keeps open management above a gate that opens after it', async () => {
   });
   await findGate('signed-out');
   expect(layer.map((d) => d.dataset.sempodsUi)).toEqual(['gate', 'management']);
+});
+
+it('applies AppAccess className and style to the gate', async () => {
+  const f = fixture();
+  cleanups.push(() => f.runtime.dispose());
+  render(
+    <SempodsProvider runtime={f.runtime}>
+      <AppAccess
+        appName="Tasks"
+        className="my-access"
+        style={
+          {
+            '--sempods-bg': 'rgb(1, 2, 3)',
+            maxWidth: '30rem',
+          } as CSSProperties
+        }
+      />
+    </SempodsProvider>,
+  );
+  const shown = await findGate('no-connection');
+  const surface = shown.querySelector<HTMLElement>('[data-sempods-access]')!;
+  expect(surface.classList.contains('my-access')).toBe(true);
+  expect(surface.style.maxWidth).toBe('30rem');
+  expect(surface.style.getPropertyValue('--sempods-bg')).toBe('rgb(1, 2, 3)');
+  // Tokens also reach the layer itself; layout styles stay on the surface.
+  expect(shown.style.getPropertyValue('--sempods-bg')).toBe('rgb(1, 2, 3)');
+  expect(shown.style.maxWidth).toBe('');
 });
