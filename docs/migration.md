@@ -66,7 +66,12 @@ seconds, the sempods server's default).
   too. Under 0.7 such a session ended with `exchange`; a refusal of the token
   endpoint still ends with `exchange`.
 - **A token request is given up after 20 seconds** and counts as lost; there
-  was no limit before.
+  was no limit before. An answer that is neither a token response nor an OAuth
+  error (`400`, `401`), such as a `5xx`, `403` or `429` from a proxy, counts as
+  lost too.
+- **Downgrading to 0.7** reads such a claim as `interrupted` and leaves it
+  stored, with its refresh token, until the person signs in again or signs
+  out.
 - **A refresh the earlier page left** (reload or a suspended tab during the
   request) is resent once at the next start within the grace period
   (`restoring` → `active`) instead of ending as `interrupted`. Refresh claims

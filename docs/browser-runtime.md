@@ -562,16 +562,21 @@ consumed session; a lost one is resent once, as below.
 
 A token request whose answer is lost no longer signs people out. The refresh
 claim keeps the sent refresh token, the granted scopes and when it was first
-sent. The outcome is unknown when the token endpoint gives no complete answer:
-no connection, no answer within 20 seconds, a body cut off, or a `5xx`, `408`
-or `429`. The Pod may have rotated the token, so the runtime sends the same
-token once more while it was first sent less than `refreshGracePeriod` ago
-(60 seconds by default, the sempods server's default rotation grace period):
+sent. The outcome is unknown when the token endpoint gives no complete answer
+(no connection, no answer within 20 seconds, a body cut off), or one that is
+neither a token response (`2xx`) nor an OAuth error answer (`400`, `401`), such
+as a gateway or proxy failure (`5xx`, `403`, `404`, `408`, `429`). The Pod may
+have rotated the token, so the runtime sends the same token once more while it
+was first sent less than `refreshGracePeriod` ago (60 seconds by default, the
+sempods server's default rotation grace period). It first rediscovers the Pod:
+that read probes the network, so a connection that lost the answer does not
+lose the one resend too, and the grace period is checked again right before
+the resend is recorded:
 
 | After a lost answer                                      | Result                                                                                     |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Online, within the grace period                          | Resent at once; `renewing` until it settles, then `active`                                 |
-| Offline, within the grace period                         | `ended { problem: 'network', restorable: true }`; resent on `online` or `retryRestore(id)` |
+| Online, within the grace period                          | Rediscovered, then resent; `renewing` until it settles, then `active`                      |
+| Offline or Pod unreachable, within the grace period      | `ended { problem: 'network', restorable: true }`; resent on `online` or `retryRestore(id)` |
 | Offline beyond the grace period                          | `ended { problem: 'interrupted' }`; nothing is sent                                        |
 | The resend loses its answer too                          | `ended { problem: 'interrupted' }`                                                         |
 | The resend is refused (reuse detection, `invalid_grant`) | `ended` with the server's problem (`exchange`), as before                                  |
@@ -581,15 +586,17 @@ The resend is recorded durably before it is sent, so a reload never sends it a
 third time. A session that ends this way keeps its Pod address: it is listed as
 a [remembered Pod](#remembered-pods) with `signed-out { problem: 'interrupted' }`
 from the next start on, and signing in again is one action. While restorable,
-nothing is dispatched. Of the token endpoint's outcomes, only an explicit
-refusal (`invalid_grant`, `invalid_client`) or an outcome still unknown beyond
-the grace period ends the session, besides an expired access token without a
+nothing is dispatched. Of the token endpoint's outcomes, only an OAuth error
+answer (for example `invalid_grant` or `invalid_client`) or an outcome still
+unknown beyond the grace period ends the session, besides an expired access token without a
 refresh token; an answer that does not continue the session (`claims`) and
 local failures (`storage`) end it as before.
 
 A Pod without a grace period treats the resend as reuse and refuses it, so the
 session ends as before; with one (sempods-kotlin#447) it survives.
-`refreshGracePeriod: 0` never resends. Should a page close before an ended
+`refreshGracePeriod: 0` never resends. The grace period is measured on this
+device's clock from the first send; a clock set back extends it on the client
+only, and the Pod still refuses a late resend. Should a page close before an ended
 session's claim is retired, the next start within the grace period may send
 that claim's token once more; its result passes the same continuity checks.
 These are fixture tests; evidence against a deployed Pod with the grace period

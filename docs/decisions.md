@@ -190,9 +190,9 @@ the session.
 A refresh is claimed durably before its token is sent, while a failure
 before that point keeps the session signed in. A refresh token is reused at
 most once, within the Pod's grace period, only after an unknown outcome: when
-the token request loses its answer (no connection, a timeout, a server or
-gateway failure) or a page left during it, the claim, which keeps the token
-and when it was sent, sends it once more. Only an explicit refusal of the token
+the token request loses its answer (no connection, a timeout, a gateway
+failure instead of a token or OAuth error answer) or a page left during it, the claim, which keeps the token
+and when it was sent, sends it once more. Only an OAuth error answer of the token
 endpoint, an expired access token without a refresh token, or an outcome still
 unknown beyond the grace period ends the session; the Pod address stays.
 Startup never waits for a Pod's discovery. The storage namespace

@@ -151,6 +151,8 @@ it.each([
   ['an unavailable server', 503],
   ['a timeout answer', 408],
   ['a rate limit', 429],
+  ['a proxy refusal', 403],
+  ['a missing route', 404],
 ] as const)('treats %s as a lost answer', async (_name, status) => {
   const { f, runtime, id } = await signedIn();
   f.setToken(losing(1, () => Promise.resolve(new Response(null, { status }))));
@@ -411,6 +413,102 @@ it('sends nothing more after a sign-out while waiting offline', async () => {
   expect(JSON.stringify(await savedRecords(f.factory))).not.toContain(
     'refresh-private',
   );
+});
+
+it('ends as interrupted when the resend in the page loses its answer too', async () => {
+  const { f, runtime, id } = await signedIn();
+  f.setToken(failed);
+  expect(await refusedRead(f, runtime, id)).toEqual({ kind: 'invalidated' });
+  expect(session(runtime)).toMatchObject({
+    kind: 'ended',
+    problem: 'interrupted',
+  });
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private', 'refresh-private']);
+  await vi.waitFor(async () =>
+    expect(await record(f)).toEqual(
+      expect.objectContaining({ kind: 'disconnected', reason: 'interrupted' }),
+    ),
+  );
+});
+
+it('ends as interrupted when the resend after coming online loses its answer too', async () => {
+  const { f, runtime, id } = await signedIn();
+  f.setToken(failed);
+  const network = goOffline();
+  await refusedRead(f, runtime, id);
+  expect(session(runtime)).toMatchObject({ restorable: true });
+  network.online();
+  await vi.waitFor(() =>
+    expect(session(runtime)).toMatchObject({
+      kind: 'ended',
+      problem: 'interrupted',
+    }),
+  );
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private', 'refresh-private']);
+});
+
+it('keeps the one resend when the network is down although the browser reports online', async () => {
+  const { f, runtime, id } = await signedIn();
+  // The probe before the resend fails too: wait instead of spending it.
+  const original = f.fetch.getMockImplementation()!;
+  const state = { down: false };
+  f.fetch.mockImplementation(async (url, init) => {
+    if (state.down) throw new TypeError('Failed to fetch');
+    return original(url, init);
+  });
+  f.setToken(async () => {
+    state.down = true;
+    return failed();
+  });
+  await refusedRead(f, runtime, id);
+  expect(session(runtime)).toEqual({
+    kind: 'ended',
+    problem: 'network',
+    restorable: true,
+  });
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
+  state.down = false;
+  f.setToken(rotated);
+  window.dispatchEvent(new Event('online'));
+  await vi.waitFor(() =>
+    expect(session(runtime)).toMatchObject({ kind: 'active' }),
+  );
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private', 'refresh-private']);
+});
+
+it('sends no resend once a slow probe took it past the grace period', async () => {
+  const { f, runtime, id } = await signedIn();
+  const original = f.fetch.getMockImplementation()!;
+  const held = deferred<void>();
+  let probing = false;
+  f.fetch.mockImplementation(async (url, init) => {
+    if (probing && url.includes('/.well-known/')) await held.promise;
+    return original(url, init);
+  });
+  f.setToken(async () => {
+    probing = true;
+    return failed();
+  });
+  const read = refusedRead(f, runtime, id);
+  await vi.waitFor(() => expect(sentRefreshTokens(f)).toHaveLength(1));
+  advance(60_000);
+  held.resolve();
+  expect(await read).toEqual({ kind: 'invalidated' });
+  expect(session(runtime)).toMatchObject({
+    kind: 'ended',
+    problem: 'interrupted',
+  });
+  expect(sentRefreshTokens(f)).toEqual(['refresh-private']);
+});
+
+it('keeps a very long grace period restorable instead of ending at once', async () => {
+  const { f, runtime, id } = await signedIn({ refreshGracePeriod: 1e12 });
+  f.setToken(losing(1));
+  goOffline();
+  await refusedRead(f, runtime, id);
+  await settleLease();
+  await settleLease();
+  expect(session(runtime)).toMatchObject({ kind: 'ended', restorable: true });
 });
 
 it('never resends with a grace period of 0', async () => {

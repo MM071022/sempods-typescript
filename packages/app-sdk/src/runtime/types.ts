@@ -208,8 +208,9 @@ export interface BrowserRuntimeOptions {
   /**
    * The Pod's refresh rotation grace period in milliseconds (default
    * `60_000`, the sempods server's default). When the answer to a renewal
-   * is lost (no connection, a timeout after 20 seconds, a `5xx`, `408` or
-   * `429`), or a page left during one, the refresh token is sent once more
+   * is lost (no connection, a timeout after 20 seconds, a cut-off body, or an
+   * answer that is neither a token response nor an OAuth error, such as a
+   * `5xx` or `429`), or a page left during one, the refresh token is sent once more
    * while it was first sent less than this long ago; offline, the session is
    * `restorable` until then. Beyond it, or when the resend loses its answer
    * too, the session ends as `interrupted` and the address is kept. A Pod

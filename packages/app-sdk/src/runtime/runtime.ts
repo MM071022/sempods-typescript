@@ -81,12 +81,20 @@ const TOKEN_TIMEOUT = 20_000;
 type Sent =
   | { readonly kind: 'renewed'; readonly result: ExchangeResult }
   | { readonly kind: 'lost' };
-/** No connection, a timeout or a cut-off body, or a gateway/server failure. */
+/**
+ * Whether the token endpoint's answer is unknown: no complete answer (no
+ * connection, a timeout, a cut-off body), or one that is neither a token
+ * response (`2xx`) nor an OAuth error answer (`400`, `401`), such as a
+ * gateway or proxy failure (`5xx`, `403`, `404`, `408`, `429`).
+ */
 function unanswered(status: number | undefined) {
   return (
-    status === undefined || status >= 500 || status === 408 || status === 429
+    status === undefined ||
+    !((status >= 200 && status < 300) || status === 400 || status === 401)
   );
 }
+/** The longest delay `setTimeout` keeps; longer ones fire at once. */
+const MAX_DELAY = 2_147_483_647;
 function offline() {
   return globalThis.navigator?.onLine === false;
 }
@@ -419,8 +427,11 @@ export function createBrowserRuntime(
             before.subject,
             before.scopes,
           );
-          if (sent.kind === 'lost')
-            return await afterLoss(e, generation, pod, claim.sentAt);
+          if (sent.kind === 'lost') {
+            // The one resend publishes its own outcome, like at startup.
+            await resumeLost(e, claim.sentAt);
+            return eligible(e, generation) && e.view.session.kind === 'active';
+          }
           await serial(e, async () => {
             current(e, generation);
             accepted(e, await claim.complete(sent.result));
@@ -527,26 +538,6 @@ export function createBrowserRuntime(
     }
   }
   /**
-   * After a lost answer: sends the refresh token once more while the Pod's
-   * grace period lasts, or waits for the browser to come back online. Beyond
-   * the grace period, nothing the server would accept is left (`interrupted`).
-   */
-  async function afterLoss(
-    e: Entry,
-    generation: string,
-    pod: PodDiscovery,
-    sentAt: number,
-  ): Promise<boolean> {
-    current(e, generation);
-    if (!withinGrace(sentAt)) throw new RuntimeError('interrupted');
-    if (offline()) {
-      suspend(e, generation, pod, sentAt);
-      return false;
-    }
-    await resendRefresh(e, generation, pod);
-    return true;
-  }
-  /**
    * Sends the one resend of a claimed refresh, recorded durably before it is
    * sent, and installs its result. A lost answer again rejects with
    * `interrupted`; a refusal with the server's problem.
@@ -555,9 +546,13 @@ export function createBrowserRuntime(
     e: Entry,
     generation: string,
     pod: PodDiscovery,
+    sentAt: number,
   ) {
     const claim = await serial(e, async () => {
       current(e, generation);
+      // Checked again here: discovery or queued writes may have taken it
+      // past the grace period, when the Pod would treat the resend as reuse.
+      if (!withinGrace(sentAt)) throw new RuntimeError('interrupted');
       if (!sessions || !e.revision) throw new RuntimeError('storage');
       const claimed = await sessions.resendRefresh(
         e.view.id,
@@ -605,7 +600,7 @@ export function createBrowserRuntime(
           end(e, new RuntimeError('interrupted'));
         }
       },
-      Math.max(0, sentAt + gracePeriod - Date.now()),
+      Math.min(MAX_DELAY, Math.max(0, sentAt + gracePeriod - Date.now())),
     );
     e.lifetime.signal.addEventListener('abort', () => clearTimeout(timer), {
       once: true,
@@ -622,8 +617,11 @@ export function createBrowserRuntime(
     publish();
   }
   /**
-   * Resends a refresh whose answer was lost, in this page (`pod`) or an
-   * earlier one (rediscovered first); publishes its own outcome.
+   * Resends a refresh whose answer was lost, in this page or an earlier one;
+   * publishes its own outcome. The Pod is rediscovered first (`pod` only when
+   * a restorable connection already has it): that read probes the network, so
+   * a connection that lost the answer does not lose the one resend too, and
+   * an unreachable Pod waits within the grace period.
    */
   async function resumeLost(
     e: Entry,
@@ -660,7 +658,7 @@ export function createBrowserRuntime(
         wait(pod);
         return;
       }
-      await resendRefresh(e, generation, pod);
+      await resendRefresh(e, generation, pod, sentAt);
     } catch (error) {
       if (!eligible(e, generation)) return;
       if (error instanceof OAuthError && error.problem === 'invalid-client')
